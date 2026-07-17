@@ -1,0 +1,15 @@
+{
+  "name": "control",
+  "description": "Level Offset values used to compensate the RF measurement path.",
+  "offset_direction": "add_to_sensor_reading_db",
+  "interpolation": "linear",
+  "level_offset_db_by_frequency_mhz": {
+    "1200": 0.70,
+    "2700": 0.70,
+    "3300": 0.70,
+    "4900": 0.50,
+    "5800": 0.20,
+    "6200": 0.20,
+    "7200": 0.20
+  }
+}

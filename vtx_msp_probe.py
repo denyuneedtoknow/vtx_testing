@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Read the current VTX configuration from a Betaflight Flight Controller via MSP.
+
+This utility is read-only: it never sends commands that change Flight Controller or
+VTX settings. Close Betaflight Configurator before using it because both programs
+need exclusive access to the Flight Controller serial port.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from dataclasses import dataclass
+
+
+MSP_API_VERSION = 1
+MSP_FC_VARIANT = 2
+MSP_FC_VERSION = 3
+MSP_VTX_CONFIG = 88
+MSP_SET_VTX_CONFIG = 89
+
+
+class MspError(RuntimeError):
+    """An MSP transport or Flight Controller response error."""
+
+
+@dataclass(frozen=True)
+class MspFrame:
+    direction: str
+    command: int
+    payload: bytes
+
+
+def msp_v1_request(command: int, payload: bytes = b"") -> bytes:
+    """Build an MSP v1 request frame."""
+    if not 0 <= command <= 255 or len(payload) > 255:
+        raise ValueError("MSP v1 supports command IDs and payloads up to 255.")
+    checksum = len(payload) ^ command
+    for byte in payload:
+        checksum ^= byte
+    return b"$M<" + bytes((len(payload), command)) + payload + bytes((checksum,))
+
+
+def parse_vtx_config(payload: bytes) -> dict[str, int | bool | None]:
+    """Parse the stable core fields of the MSP_VTX_CONFIG response.
+
+    Betaflight appends fields to this response between API versions. The first nine
+    bytes have remained the essential current VTX state, so optional fields are
+    decoded only when present.
+    """
+    if len(payload) < 9:
+        raise MspError(f"MSP_VTX_CONFIG response is too short ({len(payload)} bytes).")
+
+    result: dict[str, int | bool | None] = {
+        "device_type": payload[0],
+        "band": payload[1],
+        "channel": payload[2],
+        "power_index": payload[3],
+        "pit_mode": bool(payload[4]),
+        "frequency_mhz": int.from_bytes(payload[5:7], "little"),
+        "ready": bool(payload[7]),
+        "low_power_disarm": payload[8],
+        "pit_mode_frequency_mhz": None,
+        "vtx_table_available": None,
+        "vtx_table_bands": None,
+        "vtx_table_channels": None,
+        "vtx_table_power_levels": None,
+    }
+    if len(payload) >= 11:
+        result["pit_mode_frequency_mhz"] = int.from_bytes(payload[9:11], "little")
+    if len(payload) >= 15:
+        result["vtx_table_available"] = bool(payload[11])
+        result["vtx_table_bands"] = payload[12]
+        result["vtx_table_channels"] = payload[13]
+        result["vtx_table_power_levels"] = payload[14]
+    return result
+
+
+class MspClient:
+    """Minimal MSP v1 client for read-only Flight Controller queries."""
+
+    def __init__(self, serial_port, timeout_s: float) -> None:
+        self._serial = serial_port
+        self._timeout_s = timeout_s
+
+    def request(self, command: int, payload: bytes = b"") -> bytes:
+        self._serial.reset_input_buffer()
+        self._serial.write(msp_v1_request(command, payload))
+        self._serial.flush()
+        frame = self._read_frame()
+        if frame.command != command:
+            raise MspError(f"Received MSP command {frame.command}; expected {command}.")
+        if frame.direction == "!":
+            raise MspError(f"Flight Controller rejected MSP command {command}.")
+        if frame.direction != ">":
+            raise MspError(f"Unexpected MSP direction {frame.direction!r}.")
+        return frame.payload
+
+    def _read_frame(self) -> MspFrame:
+        deadline = time.monotonic() + self._timeout_s
+        window = bytearray()
+        while time.monotonic() < deadline:
+            byte = self._serial.read(1)
+            if not byte:
+                continue
+            window += byte
+            if len(window) > 3:
+                del window[0]
+            if bytes(window) != b"$M":
+                continue
+            direction = self._serial.read(1)
+            header = self._serial.read(2)
+            if len(direction) != 1 or len(header) != 2:
+                break
+            payload_size, command = header
+            payload = self._serial.read(payload_size)
+            checksum = self._serial.read(1)
+            if len(payload) != payload_size or len(checksum) != 1:
+                break
+            calculated = payload_size ^ command
+            for item in payload:
+                calculated ^= item
+            if checksum[0] != calculated:
+                raise MspError("Invalid MSP response checksum.")
+            return MspFrame(direction.decode("ascii", errors="replace"), command, payload)
+        raise MspError(f"No complete MSP response within {self._timeout_s:.1f} seconds.")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Read the current VTX configuration through Betaflight MSP.")
+    parser.add_argument("--port", required=True, help="Flight Controller serial port, for example COM5.")
+    parser.add_argument("--baud", type=int, default=115200, help="MSP serial baud rate (default: 115200).")
+    parser.add_argument("--timeout", type=float, default=2.0, help="Response timeout in seconds (default: 2).")
+    args = parser.parse_args()
+    if args.baud <= 0 or args.timeout <= 0:
+        parser.error("baud and timeout must be positive.")
+    return args
+
+
+def open_serial(port: str, baud: int, timeout_s: float):
+    try:
+        import serial
+    except ModuleNotFoundError as exc:
+        raise MspError("pyserial is not installed. Run: python -m pip install -r requirements.txt") from exc
+    try:
+        return serial.Serial(port=port, baudrate=baud, timeout=0.1, write_timeout=timeout_s)
+    except serial.SerialException as exc:
+        raise MspError(f"Cannot open {port}: {exc}") from exc
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        with open_serial(args.port, args.baud, args.timeout) as serial_port:
+            client = MspClient(serial_port, args.timeout)
+            api = client.request(MSP_API_VERSION)
+            variant = client.request(MSP_FC_VARIANT).decode("ascii", errors="replace").rstrip("\0")
+            version = client.request(MSP_FC_VERSION)
+            if len(api) < 3 or len(version) < 3:
+                raise MspError("Flight Controller returned an incomplete API or firmware version.")
+            vtx = parse_vtx_config(client.request(MSP_VTX_CONFIG))
+        result = {
+            "flight_controller": {
+                "variant": variant,
+                "firmware_version": f"{version[0]}.{version[1]}.{version[2]}",
+                "msp_protocol_version": api[0],
+                "msp_api_version": f"{api[1]}.{api[2]}",
+            },
+            "vtx": vtx,
+        }
+        print(json.dumps(result, indent=2))
+        return 0
+    except MspError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

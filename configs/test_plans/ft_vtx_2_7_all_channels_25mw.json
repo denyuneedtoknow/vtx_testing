@@ -1,0 +1,8 @@
+{
+  "vtx_profile": "../vtx_profiles/ft_vtx_2_7_4w.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "power_mw": 25,
+  "settle_time_s": 2.0,
+  "samples_per_channel": 10,
+  "bands": ["A", "B"]
+}

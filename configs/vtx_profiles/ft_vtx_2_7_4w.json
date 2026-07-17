@@ -1,0 +1,13 @@
+{
+  "id": "ft-vtx-2-7-4w",
+  "manufacturer": "FT Systems",
+  "model": "FT VTX 2.7GHz 4W 16CH",
+  "control_protocol": "irc_tramp",
+  "source_url": "https://ft.systems/videoperedavach-vtx-ft-2-7/",
+  "frequency_range_mhz": [2700, 3000],
+  "power_levels_mw": [0, 25, 2000, 4000],
+  "bands": {
+    "A": [2700, 2720, 2740, 2760, 2780, 2800, 2820, 2840],
+    "B": [2860, 2880, 2900, 2920, 2940, 2960, 2980, 3000]
+  }
+}

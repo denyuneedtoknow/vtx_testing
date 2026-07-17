@@ -1,0 +1,35 @@
+{
+  "name": "FT VTX 3.3 GHz: three-point 4 W test",
+  "vtx_profile": "../vtx_profiles/ft_vtx_3_3_4w.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "test_power": {
+    "index": 4,
+    "nominal_mw": 4000
+  },
+  "safe_power_after_test": {
+    "index": 2,
+    "nominal_mw": 25
+  },
+  "settle_time_s": 3.0,
+  "samples_per_point": 1,
+  "points": [
+    {
+      "band": "B",
+      "channel": 1,
+      "frequency_mhz": 3170,
+      "reference_output_w": 4.36
+    },
+    {
+      "band": "A",
+      "channel": 1,
+      "frequency_mhz": 3330,
+      "reference_output_w": 4.65
+    },
+    {
+      "band": "A",
+      "channel": 8,
+      "frequency_mhz": 3470,
+      "reference_output_w": 4.39
+    }
+  ]
+}

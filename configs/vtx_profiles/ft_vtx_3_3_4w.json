@@ -1,0 +1,13 @@
+{
+  "id": "ft-vtx-3-3-4w",
+  "manufacturer": "FT Systems",
+  "model": "FT VTX 3.3GHz 4W 16CH",
+  "control_protocol": "irc_tramp",
+  "source_url": "https://ft.systems/videoperedavach-vtx-ft-3-3/",
+  "frequency_range_mhz": [3170, 3470],
+  "power_levels_mw": [0, 25, 2000, 4000],
+  "bands": {
+    "A": [3330, 3350, 3370, 3390, 3410, 3430, 3450, 3470],
+    "B": [3170, 3190, 3210, 3230, 3250, 3270, 3290, 3310]
+  }
+}
