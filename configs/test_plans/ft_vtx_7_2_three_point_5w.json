@@ -1,0 +1,37 @@
+{
+  "name": "FT VTX 7.2 GHz: three-point 5 W test",
+  "vtx_profile": "../vtx_profiles/ft_vtx_7_2_5w.json",
+  "reference_measurements": "../reference_measurements/ft_vtx_7_2_5w_reference.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "test_power": {
+    "index": 4,
+    "nominal_mw": 5000
+  },
+  "safe_power_after_test": {
+    "index": 2,
+    "nominal_mw": 25
+  },
+  "settle_time_s": 3.0,
+  "observation_time_s": 5.0,
+  "sample_interval_s": 0.5,
+  "points": [
+    {
+      "band": "A",
+      "channel": 1,
+      "frequency_mhz": 6110,
+      "reference_output_mw": 6870
+    },
+    {
+      "band": "F",
+      "channel": 7,
+      "frequency_mhz": 6710,
+      "reference_output_mw": 9320
+    },
+    {
+      "band": "H",
+      "channel": 8,
+      "frequency_mhz": 7210,
+      "reference_output_mw": 6290
+    }
+  ]
+}

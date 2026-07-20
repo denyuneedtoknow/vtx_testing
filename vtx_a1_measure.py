@@ -9,25 +9,21 @@ attenuator before its RF output reaches the NRP-Z11.
 from __future__ import annotations
 
 import argparse
-import json
 import struct
 import sys
 import time
 from pathlib import Path
 
 from vtx_msp_probe import MSP_SET_VTX_CONFIG, MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config
+from vtx_profiles import load_profile, select_profile
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 
 
-DEFAULT_PROFILE = Path("configs/vtx_profiles/ft_vtx_3_3_4w.json")
-
-
-def load_a1_frequency(profile_path: Path) -> int:
+def load_a1_frequency(profile: dict[str, object]) -> int:
     try:
-        profile = json.loads(profile_path.read_text(encoding="utf-8"))
-        frequency_mhz = profile["bands"]["A"][0]
-    except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
-        raise ValueError(f"Cannot read A1 from VTX profile {profile_path}: {exc}") from exc
+        frequency_mhz = profile["bands"]["A"][0]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"Cannot read A1 from VTX profile: {exc}") from exc
     if not isinstance(frequency_mhz, int) or frequency_mhz <= 0:
         raise ValueError(f"Invalid A1 frequency in {profile_path}: {frequency_mhz!r}")
     return frequency_mhz
@@ -39,14 +35,25 @@ def build_set_vtx_config_payload(
     channel: int,
     frequency_mhz: int,
     power_index: int | None = None,
+    direct_frequency: bool = False,
 ) -> bytes:
     """Create a Betaflight API >= 1.42 MSP_SET_VTX_CONFIG payload."""
-    if not 1 <= band <= 8 or not 1 <= channel <= 8:
-        raise ValueError("band and channel must be in the range 1..8.")
+    if not 1 <= band <= 255 or not 1 <= channel <= 8:
+        raise ValueError("band must be in the range 1..255 and channel in the range 1..8.")
     if not 1 <= frequency_mhz <= 0xFFFF:
         raise ValueError("frequency_mhz must fit in an unsigned 16-bit value.")
 
-    packed_band_channel = (band - 1) * 8 + (channel - 1)
+    # MSP's old packed representation has only three bits for band and works
+    # for bands 1..8. For extra bands, command the frequency directly: both
+    # the legacy and API 1.42 explicit fields use band=0 / frequency in MHz.
+    if direct_frequency:
+        packed_band_channel = frequency_mhz
+        explicit_band = 0
+        explicit_channel = 0
+    else:
+        packed_band_channel = (band - 1) * 8 + (channel - 1) if band <= 8 else 0
+        explicit_band = band
+        explicit_channel = channel
     selected_power_index = current["power_index"] if power_index is None else power_index
     pit_mode = current["pit_mode"]
     low_power_disarm = current["low_power_disarm"]
@@ -61,8 +68,8 @@ def build_set_vtx_config_payload(
         int(bool(pit_mode)),
         int(low_power_disarm),
         int(pit_frequency),
-        band,
-        channel,
+        explicit_band,
+        explicit_channel,
         frequency_mhz,
     )
 
@@ -78,7 +85,7 @@ def format_vtx(vtx: dict[str, int | bool | None]) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Confirm, switch VTX to A1 through Betaflight, and measure its power once.")
     parser.add_argument("--port", required=True, help="Flight Controller COM port, for example COM83.")
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE, help="VTX profile containing band A channel 1.")
+    parser.add_argument("--profile", type=Path, help="VTX profile containing band A channel 1. Omit to select interactively.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--settle-time", type=float, default=3.0, help="Seconds to wait after switching (default: 3).")
@@ -95,7 +102,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        target_frequency = load_a1_frequency(args.profile)
+        if args.profile is None:
+            _, profile = select_profile()
+        else:
+            profile = load_profile(args.profile)
+        target_frequency = load_a1_frequency(profile)
+        print(f"Selected VTX: {profile['model']}")
         with open_serial(args.port, args.baud, args.timeout) as serial_port:
             client = MspClient(serial_port, args.timeout)
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
@@ -124,7 +136,7 @@ def main() -> int:
             milliwatts = watts_to_millwatts(sensor.read_watts(args.timeout_ms))
         finally:
             sensor.close()
-        print(f"Power at A1 ({target_frequency} MHz): {milliwatts:.3f} mW")
+        print(f"Power at A1 ({target_frequency} MHz): {milliwatts:.0f} mW")
         return 0
     except (MspError, NrpzError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

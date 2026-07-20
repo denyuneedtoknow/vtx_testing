@@ -11,25 +11,26 @@
     "nominal_mw": 25
   },
   "settle_time_s": 3.0,
-  "samples_per_point": 1,
+  "observation_time_s": 5.0,
+  "sample_interval_s": 0.5,
   "points": [
     {
       "band": "B",
       "channel": 1,
       "frequency_mhz": 3170,
-      "reference_output_w": 4.36
+      "reference_output_mw": 4360
     },
     {
       "band": "A",
       "channel": 1,
       "frequency_mhz": 3330,
-      "reference_output_w": 4.65
+      "reference_output_mw": 4650
     },
     {
       "band": "A",
       "channel": 8,
       "frequency_mhz": 3470,
-      "reference_output_w": 4.39
+      "reference_output_mw": 4390
     }
   ]
 }

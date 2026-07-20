@@ -182,7 +182,7 @@ def main() -> int:
             timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
             elapsed = loop_started - started
             milliwatts = watts_to_millwatts(watts)
-            print(f"{timestamp}  {milliwatts:.3f} mW", flush=True)
+            print(f"{timestamp}  {milliwatts:.0f} mW", flush=True)
             if writer:
                 writer.writerow([timestamp, f"{elapsed:.3f}", f"{milliwatts:.6f}"])
                 csv_file.flush()

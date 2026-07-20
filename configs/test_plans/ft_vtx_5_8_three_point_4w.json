@@ -1,0 +1,37 @@
+{
+  "name": "FT VTX 5.8 GHz: three-point 4 W test",
+  "vtx_profile": "../vtx_profiles/ft_vtx_5_8_4w.json",
+  "reference_measurements": "../reference_measurements/ft_vtx_5_8_4w_reference.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "test_power": {
+    "index": 4,
+    "nominal_mw": 4000
+  },
+  "safe_power_after_test": {
+    "index": 2,
+    "nominal_mw": 25
+  },
+  "settle_time_s": 3.0,
+  "observation_time_s": 5.0,
+  "sample_interval_s": 0.5,
+  "points": [
+    {
+      "band": "J",
+      "channel": 1,
+      "frequency_mhz": 4867,
+      "reference_output_mw": 3400
+    },
+    {
+      "band": "U",
+      "channel": 5,
+      "frequency_mhz": 5402,
+      "reference_output_mw": 4960
+    },
+    {
+      "band": "E",
+      "channel": 8,
+      "frequency_mhz": 5945,
+      "reference_output_mw": 2200
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "vtx_profile": "../vtx_profiles/ft_vtx_3_3_4w.json",
+  "power_index": 4,
+  "nominal_power_mw": 4000,
+  "unit": "mW",
+  "description": "Reference measurements supplied on 2026-07-16. These are reference values, not pass/fail limits.",
+  "bands": {
+    "B": [4360, 4420, 4480, 4200, 4330, 4090, 4100, 4140],
+    "A": [4650, 4520, 4480, 4400, 4400, 4420, 4350, 4390]
+  }
+}
