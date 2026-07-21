@@ -20,6 +20,11 @@ MSP_FC_VARIANT = 2
 MSP_FC_VERSION = 3
 MSP_VTX_CONFIG = 88
 MSP_SET_VTX_CONFIG = 89
+MSP_VTXTABLE_POWERLEVEL = 138
+MSP_SET_VTXTABLE_BAND = 227
+MSP_SET_VTXTABLE_POWERLEVEL = 228
+MSP_EEPROM_WRITE = 250
+DEFAULT_SCAN_TIMEOUT_S = 1.0
 
 
 class MspError(RuntimeError):
@@ -31,6 +36,14 @@ class MspFrame:
     direction: str
     command: int
     payload: bytes
+
+
+@dataclass(frozen=True)
+class FlightControllerInfo:
+    port: str
+    variant: str
+    firmware_version: str
+    msp_api_version: str
 
 
 def msp_v1_request(command: int, payload: bytes = b"") -> bytes:
@@ -76,6 +89,28 @@ def parse_vtx_config(payload: bytes) -> dict[str, int | bool | None]:
         result["vtx_table_channels"] = payload[13]
         result["vtx_table_power_levels"] = payload[14]
     return result
+
+
+def parse_vtx_power_level(payload: bytes) -> dict[str, int | str]:
+    """Parse one MSP_VTXTABLE_POWERLEVEL response from Betaflight."""
+    if len(payload) < 4:
+        raise MspError(f"MSP_VTXTABLE_POWERLEVEL response is too short ({len(payload)} bytes).")
+    level = payload[0]
+    power_value = int.from_bytes(payload[1:3], "little")
+    label_length = payload[3]
+    label_bytes = payload[4 : 4 + label_length]
+    if not level or len(label_bytes) != label_length:
+        raise MspError("Invalid MSP_VTXTABLE_POWERLEVEL response.")
+    return {
+        "index": level,
+        "value": power_value,
+        "label": label_bytes.decode("ascii", errors="replace").rstrip("\0"),
+    }
+
+
+def read_vtx_power_levels(client: "MspClient", count: int) -> list[dict[str, int | str]]:
+    """Read the VTX power table stored in the Flight Controller."""
+    return [parse_vtx_power_level(client.request(MSP_VTXTABLE_POWERLEVEL, bytes((index,)))) for index in range(1, count + 1)]
 
 
 class MspClient:
@@ -130,13 +165,30 @@ class MspClient:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Read the current VTX configuration through Betaflight MSP.")
-    parser.add_argument("--port", required=True, help="Flight Controller serial port, for example COM5.")
+    parser.add_argument(
+        "--port",
+        help="Flight Controller serial port, for example COM5. Omit to auto-detect the first MSP-capable FC.",
+    )
     parser.add_argument("--baud", type=int, default=115200, help="MSP serial baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="Response timeout in seconds (default: 2).")
+    parser.add_argument(
+        "--scan-timeout",
+        type=float,
+        default=DEFAULT_SCAN_TIMEOUT_S,
+        help="Per-port timeout while auto-detecting the Flight Controller (default: 1).",
+    )
     args = parser.parse_args()
-    if args.baud <= 0 or args.timeout <= 0:
-        parser.error("baud and timeout must be positive.")
+    if args.baud <= 0 or args.timeout <= 0 or args.scan_timeout <= 0:
+        parser.error("baud, timeout and scan-timeout must be positive.")
     return args
+
+
+def list_serial_ports() -> list[str]:
+    try:
+        from serial.tools.list_ports import comports
+    except ModuleNotFoundError as exc:
+        raise MspError("pyserial is not installed. Run: python -m pip install -r requirements.txt") from exc
+    return [port.device for port in comports()]
 
 
 def open_serial(port: str, baud: int, timeout_s: float):
@@ -150,10 +202,75 @@ def open_serial(port: str, baud: int, timeout_s: float):
         raise MspError(f"Cannot open {port}: {exc}") from exc
 
 
+def probe_flight_controller(port: str, baud: int, timeout_s: float) -> FlightControllerInfo | None:
+    """Return FC details when the port responds to MSP, otherwise None."""
+    try:
+        with open_serial(port, baud, timeout_s) as serial_port:
+            client = MspClient(serial_port, timeout_s)
+            api = client.request(MSP_API_VERSION)
+            variant = client.request(MSP_FC_VARIANT).decode("ascii", errors="replace").rstrip("\0")
+            version = client.request(MSP_FC_VERSION)
+    except MspError:
+        return None
+    if len(api) < 3 or len(version) < 3 or not variant:
+        return None
+    return FlightControllerInfo(
+        port=port,
+        variant=variant,
+        firmware_version=f"{version[0]}.{version[1]}.{version[2]}",
+        msp_api_version=f"{api[1]}.{api[2]}",
+    )
+
+
+def find_flight_controller_port(
+    baud: int = 115200,
+    scan_timeout_s: float = DEFAULT_SCAN_TIMEOUT_S,
+) -> FlightControllerInfo:
+    ports = list_serial_ports()
+    if not ports:
+        raise MspError("No serial ports found. Connect the Flight Controller and try again.")
+
+    print("Searching for Flight Controller...", flush=True)
+    matches: list[FlightControllerInfo] = []
+    for port in ports:
+        info = probe_flight_controller(port, baud, scan_timeout_s)
+        if info is not None:
+            matches.append(info)
+
+    if not matches:
+        raise MspError(
+            "No Flight Controller found. Close Betaflight Configurator, connect the FC via USB, "
+            "and ensure MSP is enabled on the serial port."
+        )
+    if len(matches) > 1:
+        details = ", ".join(f"{item.port} ({item.variant} {item.firmware_version})" for item in matches)
+        raise MspError(f"Multiple Flight Controllers found: {details}. Pass --port to choose one.")
+    return matches[0]
+
+
+def resolve_port(
+    port: str | None,
+    baud: int = 115200,
+    timeout_s: float = 2.0,
+    *,
+    scan_timeout_s: float = DEFAULT_SCAN_TIMEOUT_S,
+) -> str:
+    if port:
+        return port
+    info = find_flight_controller_port(baud, scan_timeout_s)
+    print(
+        f"Using Flight Controller on {info.port} "
+        f"({info.variant} {info.firmware_version}, MSP API {info.msp_api_version}).",
+        flush=True,
+    )
+    return info.port
+
+
 def main() -> int:
     args = parse_args()
     try:
-        with open_serial(args.port, args.baud, args.timeout) as serial_port:
+        port = resolve_port(args.port, args.baud, args.timeout, scan_timeout_s=args.scan_timeout)
+        with open_serial(port, args.baud, args.timeout) as serial_port:
             client = MspClient(serial_port, args.timeout)
             api = client.request(MSP_API_VERSION)
             variant = client.request(MSP_FC_VARIANT).decode("ascii", errors="replace").rstrip("\0")
@@ -161,6 +278,7 @@ def main() -> int:
             if len(api) < 3 or len(version) < 3:
                 raise MspError("Flight Controller returned an incomplete API or firmware version.")
             vtx = parse_vtx_config(client.request(MSP_VTX_CONFIG))
+            power_levels = read_vtx_power_levels(client, int(vtx["vtx_table_power_levels"] or 0))
         result = {
             "flight_controller": {
                 "variant": variant,
@@ -169,6 +287,7 @@ def main() -> int:
                 "msp_api_version": f"{api[1]}.{api[2]}",
             },
             "vtx": vtx,
+            "vtx_power_table": power_levels,
         }
         print(json.dumps(result, indent=2))
         return 0

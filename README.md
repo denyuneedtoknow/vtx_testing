@@ -92,12 +92,18 @@ Level Offset у dB для вимірювального тракту. Це дод
 налаштувань Flight Controller або VTX. Закрийте Betaflight Configurator, бо він
 використовує той самий COM-порт Flight Controller.
 
-На Windows встановіть залежність і запустіть probe, вказавши COM-порт FC:
+На Windows встановіть залежність і запустіть probe. Без `--port` він перебере
+доступні serial-порти та вибере єдиний Flight Controller, який відповідає на
+MSP-запити:
 
 ```powershell
 python -m pip install -r requirements.txt
-python .\vtx_msp_probe.py --port COM5
+python .\vtx_msp_probe.py
 ```
+
+Якщо до ПК підключено кілька Flight Controller, скрипт виведе знайдені порти й
+попросить явно вказати потрібний, наприклад `--port COM5`. Для повільних
+пристроїв можна збільшити час перевірки одного порту: `--scan-timeout 2`.
 
 Вивід містить поточні `band`, `channel`, `frequency_mhz`, `power_index` і стан
 готовності VTX. Цей інструмент є безпечним першим етапом перед реалізацією
@@ -114,20 +120,20 @@ NRP-Z11. Поточні power index та pit mode скрипт не змінює
 через атенюатор. Запуск:
 
 ```powershell
-python .\vtx_a1_measure.py --port COM83
+python .\vtx_a1_measure.py
 ```
 
 Якщо не передавати `--profile`, скрипт запропонує вибрати один із локальних
 профілів VTX. Це зручно для FT VTX 5.8 і 7.2:
 
 ```powershell
-python .\vtx_a1_measure.py --port COM83
+python .\vtx_a1_measure.py
 ```
 
 Для іншого VTX передайте відповідний профіль, наприклад:
 
 ```powershell
-python .\vtx_a1_measure.py --port COM83 --profile .\configs\vtx_profiles\ft_vtx_2_7_4w.json
+python .\vtx_a1_measure.py --profile .\configs\vtx_profiles\ft_vtx_2_7_4w.json
 ```
 
 ## Три-точковий тест FT VTX 3.3 на 4 W
@@ -143,28 +149,51 @@ python .\vtx_a1_measure.py --port COM83 --profile .\configs\vtx_profiles\ft_vtx_
 зберігаються у `logs/vtx-test-<UTC timestamp>.csv` — це основа для майбутнього
 графіка та виявлення падіння потужності під час прогріву.
 
+Значення середньої, мінімальної та максимальної потужності порівнюються з
+референсом конкретної точки: зелений означає не менше 90% від референсу,
+жовтий — 80–89.9%, червоний — менше 80%. Пороги зберігаються у test plan в
+`reference_thresholds_percent`; за потреби кольори можна вимкнути параметром
+`--no-color`.
+
 ```powershell
-python .\vtx_three_point_test.py --port COM83
+python .\vtx_three_point_test.py
 ```
 
-Скрипт запропонує вибрати 3.3 / 5.8 / 7.2. Для кожної моделі використовується
-мінімальна доступна частота, частота найближча до математичної середини діапазону
-та максимальна доступна частота — а не фіксовані назви бендів. Поточні точки:
+Скрипт запропонує вибрати 1.2 / 2.7 / 3.3 / 5.8 / 7.2. Точки задаються у test plan для
+кожної моделі. Поточні точки:
 
+- FT 1.2: 1080, 1200, 1320 MHz;
+- FT 2.7: 2700, 2860, 3000 MHz;
 - FT 3.3: 3170, 3330, 3470 MHz;
-- FT 5.8: 4867, 5402, 5945 MHz;
+- FT 5.8: 4990, 5510, 5945 MHz;
 - FT 7.2: 6110, 6710, 7210 MHz.
 
-Для FT 5.8 бенди J/U/O/H лежать за межами старого восьмибендового MSP-кодування,
-тому скрипт задає їх за прямою частотою в MHz. У відповідь FC може показати
-`band: 0`, що для такого режиму є очікуваним.
+Для FT 5.8 тест використовує лише вісім бендів, підтримуваних Betaflight:
+`A`, `B`, `E`, `F`, `R`, `D`, `X` і `L`.
+
+## Ручне перемикання тестових точок
+
+Для ручного вибору точки додайте `--manual`. Скрипт покаже три точки обраного
+test plan; введіть їхній номер, щоб перемкнути VTX на тестову потужність і
+частоту. Після кожного вибору він виконує вимірювання NRP-Z11, виводить
+avg/min/max та додає сирі зразки до CSV. Пункт `0` завершує сесію та автоматично
+повертає VTX до 25 mW на останній вибраній частоті.
+
+```powershell
+python .\vtx_three_point_test.py --vtx 5.8 --manual
+```
+
+Для FT VTX 5.8 меню містить `X1 / 4990 MHz`, `D5 / 5510 MHz` та
+`E8 / 5945 MHz`. Інші моделі показують точки зі свого test plan.
 
 Для серії однакових VTX вкажіть модель прямо в команді — меню не з'явиться:
 
 ```powershell
-python .\vtx_three_point_test.py --port COM83 --vtx 7.2
-python .\vtx_three_point_test.py --port COM83 --vtx 5.8
-python .\vtx_three_point_test.py --port COM83 --vtx 3.3
+python .\vtx_three_point_test.py --vtx 7.2
+python .\vtx_three_point_test.py --vtx 5.8
+python .\vtx_three_point_test.py --vtx 3.3
+python .\vtx_three_point_test.py --vtx 2.7
+python .\vtx_three_point_test.py --vtx 1.2
 ```
 
 Точки, power index та еталонні потужності зберігаються у

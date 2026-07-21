@@ -17,6 +17,11 @@ def load_profile(path: Path) -> dict[str, Any]:
         raise ValueError(f"Cannot read VTX profile {path}: {exc}") from exc
     if not isinstance(profile.get("id"), str) or not isinstance(profile.get("model"), str):
         raise ValueError(f"VTX profile {path} has no valid id or model.")
+    bands = profile.get("bands")
+    if not isinstance(bands, dict) or not bands:
+        raise ValueError(f"VTX profile {path} has no valid bands.")
+    if len(bands) > 8:
+        raise ValueError(f"VTX profile {path} has {len(bands)} bands; Betaflight supports at most 8.")
     return profile
 
 

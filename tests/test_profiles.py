@@ -24,11 +24,19 @@ class VtxProfileTests(unittest.TestCase):
     def test_3_3_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_3_3_4w.json", "ft_vtx_3_3_4w_reference.json")
 
+    def test_2_7_reference_values_match_profile_bands_and_channels(self):
+        self.assert_reference_matches_profile("ft_vtx_2_7_4w.json", "ft_vtx_2_7_4w_reference.json")
+
+    def test_1_2_reference_values_match_profile_bands_and_channels(self):
+        self.assert_reference_matches_profile("ft_vtx_1_2_4w.json", "ft_vtx_1_2_4w_reference.json")
+
     def test_5_8_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_5_8_4w.json", "ft_vtx_5_8_4w_reference.json")
 
     def test_three_point_plans_match_their_vtx_profiles(self):
         for name in (
+            "ft_vtx_1_2_three_point_4w.json",
+            "ft_vtx_2_7_three_point_4w.json",
             "ft_vtx_3_3_three_point_4w.json",
             "ft_vtx_5_8_three_point_4w.json",
             "ft_vtx_7_2_three_point_5w.json",
@@ -36,8 +44,31 @@ class VtxProfileTests(unittest.TestCase):
             plan = load_plan(ROOT / "configs/test_plans" / name)
             self.assertEqual(len(plan["points"]), 3)
 
+    def test_5_8_plan_uses_betaflight_supported_bands(self):
+        plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_three_point_4w.json")
+        self.assertEqual(
+            [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
+            [("X", 1, 4990), ("D", 5, 5510), ("E", 8, 5945)],
+        )
+        self.assertEqual(set(plan["_profile"]["bands"]), {"A", "B", "E", "F", "R", "D", "X", "L"})
+
+    def test_new_plans_use_the_supported_1_2_and_2_7_points(self):
+        expected_points = {
+            "ft_vtx_1_2_three_point_4w.json": [("A", 1, 1080), ("A", 4, 1200), ("A", 8, 1320)],
+            "ft_vtx_2_7_three_point_4w.json": [("A", 1, 2700), ("B", 1, 2860), ("B", 8, 3000)],
+        }
+        for plan_name, expected in expected_points.items():
+            plan = load_plan(ROOT / "configs/test_plans" / plan_name)
+            actual = [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]]
+            self.assertEqual(actual, expected)
+
+    def test_all_vtx_profiles_have_at_most_eight_betaflight_bands(self):
+        for profile_path in (ROOT / "configs/vtx_profiles").glob("*.json"):
+            with self.subTest(profile=profile_path.name):
+                self.assertLessEqual(len(load_profile(profile_path)["bands"]), 8)
+
     def test_each_short_vtx_option_resolves_to_a_plan(self):
-        for vtx in ("3.3", "5.8", "7.2"):
+        for vtx in ("1.2", "2.7", "3.3", "5.8", "7.2"):
             self.assertTrue(plan_for_vtx(vtx).is_file())
 
 

@@ -1,0 +1,36 @@
+{
+  "name": "FT VTX 1.2 GHz: three-point 4 W test",
+  "vtx_profile": "../vtx_profiles/ft_vtx_1_2_4w.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "test_power": {
+    "index": 4,
+    "nominal_mw": 4000
+  },
+  "safe_power_after_test": {
+    "index": 2,
+    "nominal_mw": 25
+  },
+  "settle_time_s": 3.0,
+  "observation_time_s": 5.0,
+  "sample_interval_s": 0.5,
+  "points": [
+    {
+      "band": "A",
+      "channel": 1,
+      "frequency_mhz": 1080,
+      "reference_output_mw": 3680
+    },
+    {
+      "band": "A",
+      "channel": 4,
+      "frequency_mhz": 1200,
+      "reference_output_mw": 4870
+    },
+    {
+      "band": "A",
+      "channel": 8,
+      "frequency_mhz": 1320,
+      "reference_output_mw": 4020
+    }
+  ]
+}

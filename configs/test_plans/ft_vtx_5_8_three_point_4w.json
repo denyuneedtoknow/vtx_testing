@@ -11,21 +11,25 @@
     "index": 2,
     "nominal_mw": 25
   },
+  "reference_thresholds_percent": {
+    "green_min": 90,
+    "yellow_min": 80
+  },
   "settle_time_s": 3.0,
   "observation_time_s": 5.0,
   "sample_interval_s": 0.5,
   "points": [
     {
-      "band": "J",
+      "band": "X",
       "channel": 1,
-      "frequency_mhz": 4867,
-      "reference_output_mw": 3400
+      "frequency_mhz": 4990,
+      "reference_output_mw": 3930
     },
     {
-      "band": "U",
+      "band": "D",
       "channel": 5,
-      "frequency_mhz": 5402,
-      "reference_output_mw": 4960
+      "frequency_mhz": 5510,
+      "reference_output_mw": 4550
     },
     {
       "band": "E",

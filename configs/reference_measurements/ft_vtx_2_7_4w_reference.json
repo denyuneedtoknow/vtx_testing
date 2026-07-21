@@ -1,0 +1,11 @@
+{
+  "vtx_profile": "../vtx_profiles/ft_vtx_2_7_4w.json",
+  "power_index": 4,
+  "nominal_power_mw": 4000,
+  "unit": "mW",
+  "description": "Reference values transcribed from the supplied FT VTX 2.7 GHz 4 W table on 2026-07-21.",
+  "bands": {
+    "A": [3400, 3420, 3460, 3560, 3660, 3690, 3820, 3860],
+    "B": [3880, 3890, 3880, 3840, 3770, 3670, 3540, 3410]
+  }
+}

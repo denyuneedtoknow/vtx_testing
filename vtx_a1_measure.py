@@ -14,7 +14,15 @@ import sys
 import time
 from pathlib import Path
 
-from vtx_msp_probe import MSP_SET_VTX_CONFIG, MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config
+from vtx_msp_probe import (
+    MSP_SET_VTX_CONFIG,
+    MSP_VTX_CONFIG,
+    MspClient,
+    MspError,
+    open_serial,
+    parse_vtx_config,
+    resolve_port,
+)
 from vtx_profiles import load_profile, select_profile
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 
@@ -36,6 +44,7 @@ def build_set_vtx_config_payload(
     frequency_mhz: int,
     power_index: int | None = None,
     direct_frequency: bool = False,
+    vtx_table: tuple[int, int, int, bool] | None = None,
 ) -> bytes:
     """Create a Betaflight API >= 1.42 MSP_SET_VTX_CONFIG payload."""
     if not 1 <= band <= 255 or not 1 <= channel <= 8:
@@ -61,8 +70,14 @@ def build_set_vtx_config_payload(
     if not all(isinstance(value, (int, bool)) for value in (selected_power_index, pit_mode, low_power_disarm, pit_frequency)):
         raise ValueError("Current VTX configuration is incomplete.")
 
+    table_bands, table_channels, table_power_levels, table_clear = vtx_table or (0, 0, 0, False)
+    if not all(0 <= value <= 8 for value in (table_bands, table_channels, table_power_levels)):
+        raise ValueError("VTX table counts must be in the range 0..8.")
+
+    # Betaflight 4.5 consumes 15 bytes: the legacy fields, the API 1.42
+    # band/channel extension, and four VTX-table count/clear fields.
     return struct.pack(
-        "<HBBBHBBH",
+        "<HBBBHBBHBBBB",
         packed_band_channel,
         int(selected_power_index),
         int(bool(pit_mode)),
@@ -71,6 +86,10 @@ def build_set_vtx_config_payload(
         explicit_band,
         explicit_channel,
         frequency_mhz,
+        table_bands,
+        table_channels,
+        table_power_levels,
+        int(table_clear),
     )
 
 
@@ -84,7 +103,10 @@ def format_vtx(vtx: dict[str, int | bool | None]) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Confirm, switch VTX to A1 through Betaflight, and measure its power once.")
-    parser.add_argument("--port", required=True, help="Flight Controller COM port, for example COM83.")
+    parser.add_argument(
+        "--port",
+        help="Flight Controller COM port, for example COM83. Omit to auto-detect the first MSP-capable FC.",
+    )
     parser.add_argument("--profile", type=Path, help="VTX profile containing band A channel 1. Omit to select interactively.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
@@ -102,13 +124,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        port = resolve_port(args.port, args.baud, args.timeout)
         if args.profile is None:
             _, profile = select_profile()
         else:
             profile = load_profile(args.profile)
         target_frequency = load_a1_frequency(profile)
         print(f"Selected VTX: {profile['model']}")
-        with open_serial(args.port, args.baud, args.timeout) as serial_port:
+        with open_serial(port, args.baud, args.timeout) as serial_port:
             client = MspClient(serial_port, args.timeout)
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Current VTX: {format_vtx(current)}")
