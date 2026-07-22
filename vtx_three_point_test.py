@@ -176,13 +176,19 @@ def verify_vtx_table(
     for index, ((expected_letter, expected_frequencies), actual_band) in enumerate(
         zip(band_items, actual_bands), start=1
     ):
-        actual_letter = str(actual_band["letter"]).upper()
+        actual_letter = str(actual_band["letter"]).strip().upper()
         actual_frequencies = actual_band["frequencies_mhz"]
-        if actual_letter != expected_letter.upper() or actual_frequencies != expected_frequencies:
+        if actual_frequencies != expected_frequencies:
             raise MspError(
                 f"Flight Controller VTX band {index} does not match the selected profile: "
                 f"expected {expected_letter} {expected_frequencies}; got "
-                f"{actual_letter} {actual_frequencies}. FC settings were not changed."
+                f"{actual_letter or actual_band['name']} {actual_frequencies}. FC settings were not changed."
+            )
+        if actual_letter and actual_letter != expected_letter.upper():
+            raise MspError(
+                f"Flight Controller VTX band {index} letter does not match the selected profile: "
+                f"expected {expected_letter}; got {actual_letter} (name {actual_band['name']!r}). "
+                "FC settings were not changed."
             )
 
     actual_power_levels = read_vtx_power_levels(client, len(power_levels))

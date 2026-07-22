@@ -116,7 +116,12 @@ def parse_vtx_band(payload: bytes) -> dict[str, int | str | bool | list[int]]:
     if not index or len(payload) < metadata_offset + 3:
         raise MspError("Invalid MSP_VTXTABLE_BAND response.")
     name_bytes = payload[2:metadata_offset]
+    name = name_bytes.decode("ascii", errors="replace").rstrip("\0")
     letter = payload[metadata_offset]
+    letter_char = chr(letter) if letter else ""
+    if not letter_char.strip("\0 "):
+        stripped_name = name.strip()
+        letter_char = stripped_name[0] if stripped_name else ""
     is_factory = bool(payload[metadata_offset + 1])
     channel_count = payload[metadata_offset + 2]
     frequencies_offset = metadata_offset + 3
@@ -129,8 +134,8 @@ def parse_vtx_band(payload: bytes) -> dict[str, int | str | bool | list[int]]:
     ]
     return {
         "index": index,
-        "name": name_bytes.decode("ascii", errors="replace").rstrip("\0"),
-        "letter": chr(letter),
+        "name": name,
+        "letter": letter_char,
         "is_factory": is_factory,
         "frequencies_mhz": frequencies,
     }

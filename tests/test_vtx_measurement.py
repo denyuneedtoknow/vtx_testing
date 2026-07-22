@@ -150,9 +150,9 @@ class VtxMeasurementTests(unittest.TestCase):
                 index = payload[0]
                 if command == MSP_VTXTABLE_BAND:
                     letter, frequencies = list(profile["bands"].items())[index - 1]
-                    name = letter.encode("ascii").ljust(8, b"\0")
+                    name = letter.encode("ascii")
                     return (
-                        bytes((index, 8)) + name + bytes((ord(letter), 0, len(frequencies)))
+                        bytes((index, len(name))) + name + bytes((0, 0, len(frequencies)))
                         + b"".join(frequency.to_bytes(2, "little") for frequency in frequencies)
                     )
                 if command == MSP_VTXTABLE_POWERLEVEL:

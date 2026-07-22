@@ -52,6 +52,16 @@ class MspProbeTests(unittest.TestCase):
             },
         )
 
+    def test_parses_vtx_band_letter_from_name_when_letter_byte_is_empty(self):
+        frequencies = [2700, 2720, 2740, 2760, 2780, 2800, 2820, 2840]
+        payload = (
+            bytes((1, 1)) + b"A" + bytes((0, 0, len(frequencies)))
+            + b"".join(frequency.to_bytes(2, "little") for frequency in frequencies)
+        )
+        band = parse_vtx_band(payload)
+        self.assertEqual(band["letter"], "A")
+        self.assertEqual(band["frequencies_mhz"], frequencies)
+
     def test_resolve_port_uses_explicit_value(self):
         self.assertEqual(resolve_port("COM83", 115200, 2.0), "COM83")
 
