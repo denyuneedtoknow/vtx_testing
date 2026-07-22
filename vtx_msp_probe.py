@@ -20,10 +20,8 @@ MSP_FC_VARIANT = 2
 MSP_FC_VERSION = 3
 MSP_VTX_CONFIG = 88
 MSP_SET_VTX_CONFIG = 89
+MSP_VTXTABLE_BAND = 137
 MSP_VTXTABLE_POWERLEVEL = 138
-MSP_SET_VTXTABLE_BAND = 227
-MSP_SET_VTXTABLE_POWERLEVEL = 228
-MSP_EEPROM_WRITE = 250
 DEFAULT_SCAN_TIMEOUT_S = 1.0
 
 
@@ -108,13 +106,48 @@ def parse_vtx_power_level(payload: bytes) -> dict[str, int | str]:
     }
 
 
+def parse_vtx_band(payload: bytes) -> dict[str, int | str | bool | list[int]]:
+    """Parse one MSP_VTXTABLE_BAND response from Betaflight."""
+    if len(payload) < 5:
+        raise MspError(f"MSP_VTXTABLE_BAND response is too short ({len(payload)} bytes).")
+    index = payload[0]
+    name_length = payload[1]
+    metadata_offset = 2 + name_length
+    if not index or len(payload) < metadata_offset + 3:
+        raise MspError("Invalid MSP_VTXTABLE_BAND response.")
+    name_bytes = payload[2:metadata_offset]
+    letter = payload[metadata_offset]
+    is_factory = bool(payload[metadata_offset + 1])
+    channel_count = payload[metadata_offset + 2]
+    frequencies_offset = metadata_offset + 3
+    expected_size = frequencies_offset + channel_count * 2
+    if channel_count == 0 or len(payload) < expected_size:
+        raise MspError("Invalid MSP_VTXTABLE_BAND channel data.")
+    frequencies = [
+        int.from_bytes(payload[offset : offset + 2], "little")
+        for offset in range(frequencies_offset, expected_size, 2)
+    ]
+    return {
+        "index": index,
+        "name": name_bytes.decode("ascii", errors="replace").rstrip("\0"),
+        "letter": chr(letter),
+        "is_factory": is_factory,
+        "frequencies_mhz": frequencies,
+    }
+
+
+def read_vtx_bands(client: "MspClient", count: int) -> list[dict[str, int | str | bool | list[int]]]:
+    """Read all VTX bands stored in the Flight Controller."""
+    return [parse_vtx_band(client.request(MSP_VTXTABLE_BAND, bytes((index,)))) for index in range(1, count + 1)]
+
+
 def read_vtx_power_levels(client: "MspClient", count: int) -> list[dict[str, int | str]]:
     """Read the VTX power table stored in the Flight Controller."""
     return [parse_vtx_power_level(client.request(MSP_VTXTABLE_POWERLEVEL, bytes((index,)))) for index in range(1, count + 1)]
 
 
 class MspClient:
-    """Minimal MSP v1 client for read-only Flight Controller queries."""
+    """Minimal MSP v1 request/response client."""
 
     def __init__(self, serial_port, timeout_s: float) -> None:
         self._serial = serial_port
@@ -278,6 +311,7 @@ def main() -> int:
             if len(api) < 3 or len(version) < 3:
                 raise MspError("Flight Controller returned an incomplete API or firmware version.")
             vtx = parse_vtx_config(client.request(MSP_VTX_CONFIG))
+            bands = read_vtx_bands(client, int(vtx["vtx_table_bands"] or 0))
             power_levels = read_vtx_power_levels(client, int(vtx["vtx_table_power_levels"] or 0))
         result = {
             "flight_controller": {
@@ -287,6 +321,7 @@ def main() -> int:
                 "msp_api_version": f"{api[1]}.{api[2]}",
             },
             "vtx": vtx,
+            "vtx_bands": bands,
             "vtx_power_table": power_levels,
         }
         print(json.dumps(result, indent=2))

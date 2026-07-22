@@ -6,6 +6,7 @@ from vtx_msp_probe import (
     MspError,
     find_flight_controller_port,
     msp_v1_request,
+    parse_vtx_band,
     parse_vtx_power_level,
     parse_vtx_config,
     resolve_port,
@@ -33,6 +34,22 @@ class MspProbeTests(unittest.TestCase):
         self.assertEqual(
             parse_vtx_power_level(bytes((4, 36, 0, 5)) + b"4000\0"),
             {"index": 4, "value": 36, "label": "4000"},
+        )
+
+    def test_parses_vtx_band_with_all_frequencies(self):
+        payload = (
+            bytes((2, 8)) + b"BAND_B\0\0" + bytes((ord("B"), 0, 2))
+            + (2860).to_bytes(2, "little") + (2880).to_bytes(2, "little")
+        )
+        self.assertEqual(
+            parse_vtx_band(payload),
+            {
+                "index": 2,
+                "name": "BAND_B",
+                "letter": "B",
+                "is_factory": False,
+                "frequencies_mhz": [2860, 2880],
+            },
         )
 
     def test_resolve_port_uses_explicit_value(self):

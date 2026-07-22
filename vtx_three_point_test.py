@@ -19,15 +19,14 @@ from typing import Any
 
 from vtx_a1_measure import build_set_vtx_config_payload, format_vtx
 from vtx_msp_probe import (
-    MSP_EEPROM_WRITE,
     MSP_SET_VTX_CONFIG,
-    MSP_SET_VTXTABLE_BAND,
-    MSP_SET_VTXTABLE_POWERLEVEL,
     MSP_VTX_CONFIG,
     MspClient,
     MspError,
     open_serial,
     parse_vtx_config,
+    read_vtx_bands,
+    read_vtx_power_levels,
     resolve_port,
 )
 from vtx_profiles import load_profile
@@ -47,6 +46,8 @@ ANSI_RESET = "\033[0m"
 ANSI_GREEN = "\033[32m"
 ANSI_YELLOW = "\033[33m"
 ANSI_RED = "\033[31m"
+REFERENCE_GRAPH_WIDTH = 28
+REFERENCE_GRAPH_MAX_PERCENT = 125.0
 
 
 def plan_for_vtx(vtx: str) -> Path:
@@ -139,30 +140,12 @@ def switch_and_confirm(
     return updated
 
 
-def build_vtx_table_band_payload(index: int, band: str, frequencies: list[int]) -> bytes:
-    label = band.encode("ascii")
-    if not 1 <= index <= 8 or not label or len(label) > 8 or not 1 <= len(frequencies) <= 8:
-        raise ValueError("Invalid VTX table band.")
-    return bytes((index, len(label))) + label + bytes((ord(band[0]), 0, len(frequencies))) + b"".join(
-        frequency.to_bytes(2, "little") for frequency in frequencies
-    )
-
-
-def build_vtx_table_power_payload(index: int, power_mw: int) -> bytes:
-    label = ("PIT" if power_mw == 0 else str(power_mw)).encode("ascii")
-    if not 1 <= index <= 8 or not 0 <= power_mw <= 0xFFFF or len(label) > 8:
-        raise ValueError("Invalid VTX table power level.")
-    return bytes((index,)) + power_mw.to_bytes(2, "little") + bytes((len(label),)) + label
-
-
-def upload_vtx_table(
+def verify_vtx_table(
     client: MspClient,
     current: dict[str, int | bool | None],
     profile: dict[str, Any],
-    *,
-    settle_time_s: float,
-) -> dict[str, int | bool | None]:
-    """Install the selected profile's VTX table in the FC, as Configurator does."""
+) -> None:
+    """Read and verify the FC VTX table without changing persistent configuration."""
     bands = profile.get("bands")
     power_levels = profile.get("power_levels_mw")
     if not isinstance(bands, dict) or not isinstance(power_levels, list):
@@ -176,33 +159,39 @@ def upload_vtx_table(
     if channel_count > 8 or any(len(frequencies) != channel_count for _, frequencies in band_items):
         raise ValueError("Every VTX table band must contain the same 1..8 channel count.")
 
-    current_band = int(current["band"])
-    current_channel = int(current["channel"])
-    if not 1 <= current_band <= len(band_items) or not 1 <= current_channel <= channel_count:
-        current_band, current_channel = 1, 1
-    current_frequency = int(current["frequency_mhz"])
-    if not current_frequency:
-        current_frequency = band_items[current_band - 1][1][current_channel - 1]
-    client.request(
-        MSP_SET_VTX_CONFIG,
-        build_set_vtx_config_payload(
-            current,
-            current_band,
-            current_channel,
-            current_frequency,
-            vtx_table=(len(band_items), channel_count, len(power_levels), True),
-        ),
+    expected_counts = (len(band_items), channel_count, len(power_levels))
+    actual_counts = (
+        current.get("vtx_table_bands"),
+        current.get("vtx_table_channels"),
+        current.get("vtx_table_power_levels"),
     )
-    for index, power_mw in enumerate(power_levels, start=1):
-        client.request(MSP_SET_VTXTABLE_POWERLEVEL, build_vtx_table_power_payload(index, power_mw))
-    for index, (band, frequencies) in enumerate(band_items, start=1):
-        client.request(MSP_SET_VTXTABLE_BAND, build_vtx_table_band_payload(index, band, frequencies))
-    client.request(MSP_EEPROM_WRITE)
-    time.sleep(settle_time_s)
-    updated = parse_vtx_config(client.request(MSP_VTX_CONFIG))
-    if updated["vtx_table_bands"] != len(band_items) or updated["vtx_table_power_levels"] != len(power_levels):
-        raise MspError("Flight Controller did not accept the VTX table.")
-    return updated
+    if actual_counts != expected_counts:
+        raise MspError(
+            "Flight Controller VTX table does not match the selected VTX profile: "
+            f"expected {expected_counts[0]} bands, {expected_counts[1]} channels and "
+            f"{expected_counts[2]} power levels; got {actual_counts}. FC settings were not changed."
+        )
+
+    actual_bands = read_vtx_bands(client, len(band_items))
+    for index, ((expected_letter, expected_frequencies), actual_band) in enumerate(
+        zip(band_items, actual_bands), start=1
+    ):
+        actual_letter = str(actual_band["letter"]).upper()
+        actual_frequencies = actual_band["frequencies_mhz"]
+        if actual_letter != expected_letter.upper() or actual_frequencies != expected_frequencies:
+            raise MspError(
+                f"Flight Controller VTX band {index} does not match the selected profile: "
+                f"expected {expected_letter} {expected_frequencies}; got "
+                f"{actual_letter} {actual_frequencies}. FC settings were not changed."
+            )
+
+    actual_power_levels = read_vtx_power_levels(client, len(power_levels))
+    actual_power_values = [int(level["value"]) for level in actual_power_levels]
+    if actual_power_values != power_levels:
+        raise MspError(
+            "Flight Controller VTX power levels do not match the selected profile: "
+            f"expected {power_levels}; got {actual_power_values}. FC settings were not changed."
+        )
 
 
 def observe_power(sensor: NrpzSensor, timeout_ms: int, duration_s: float, interval_s: float) -> list[tuple[float, float]]:
@@ -252,6 +241,20 @@ def power_color(
     return ANSI_RED
 
 
+def power_status(
+    measured_mw: float,
+    reference_mw: float,
+    thresholds_percent: dict[str, float],
+) -> str:
+    """Return the readable result label for a reference comparison."""
+    percentage = measured_mw / reference_mw * 100 if reference_mw > 0 else 0.0
+    if percentage >= thresholds_percent["green_min"]:
+        return "OK"
+    if percentage >= thresholds_percent["yellow_min"]:
+        return "LOW"
+    return "FAIL"
+
+
 def format_power(
     measured_mw: float,
     reference_mw: float | None,
@@ -264,6 +267,47 @@ def format_power(
     if not use_color or reference_mw is None:
         return text
     return f"{power_color(measured_mw, reference_mw, thresholds_percent)}{text}{ANSI_RESET}"
+
+
+def reference_chart_line(
+    point: dict[str, Any],
+    average_mw: float,
+    thresholds_percent: dict[str, float],
+    *,
+    use_color: bool,
+) -> str:
+    """Build a compact terminal chart; its vertical marker is the reference."""
+    reference_mw = point.get("reference_output_mw")
+    label = f"{point['band']}{point['channel']} {point['frequency_mhz']} MHz"
+    if not isinstance(reference_mw, (int, float)) or reference_mw <= 0:
+        return f"  {label:<12}  {average_mw:.0f} mW (reference unavailable)"
+
+    percentage = average_mw / reference_mw * 100
+    fill_count = round(min(max(percentage, 0.0), REFERENCE_GRAPH_MAX_PERCENT) / REFERENCE_GRAPH_MAX_PERCENT * REFERENCE_GRAPH_WIDTH)
+    marker_index = round(100 / REFERENCE_GRAPH_MAX_PERCENT * (REFERENCE_GRAPH_WIDTH - 1))
+    cells = ["█" if index < fill_count else "░" for index in range(REFERENCE_GRAPH_WIDTH)]
+    cells[marker_index] = "│"
+    bar = "".join(cells)
+    if use_color:
+        bar = f"{power_color(average_mw, reference_mw, thresholds_percent)}{bar}{ANSI_RESET}"
+    return (
+        f"  {label:<12} [{bar}] {average_mw:.0f} / {reference_mw:.0f} mW "
+        f"({percentage:.0f}%) {power_status(average_mw, reference_mw, thresholds_percent)}"
+    )
+
+
+def print_reference_chart(
+    results: list[tuple[dict[str, Any], dict[str, float | int]]],
+    thresholds_percent: dict[str, float],
+    *,
+    use_color: bool,
+) -> None:
+    """Print all completed points against their respective reference values."""
+    if not results:
+        return
+    print("\nPower vs reference (│ = 100% reference):")
+    for point, summary in results:
+        print(reference_chart_line(point, float(summary["average_mw"]), thresholds_percent, use_color=use_color))
 
 
 def select_manual_point(points: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -307,7 +351,7 @@ def measure_and_report_point(
     csv_writer,
     thresholds_percent: dict[str, float],
     use_color: bool,
-) -> None:
+) -> dict[str, float | int]:
     """Measure one active VTX point, write samples, and display its summary."""
     sensor.configure(point["frequency_mhz"] * 1_000_000, averages)
     readings = observe_power(sensor, timeout_ms, observation_time_s, sample_interval_s)
@@ -331,6 +375,8 @@ def measure_and_report_point(
         f"change {summary['change_mw']:+.0f} mW ({summary['change_percent']:+.1f}%) "
         f"over {summary['count']} samples{reference_text}"
     )
+    print(reference_chart_line(point, float(summary["average_mw"]), thresholds_percent, use_color=use_color))
+    return summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -340,7 +386,7 @@ def parse_args() -> argparse.Namespace:
         help="Flight Controller COM port, for example COM83. Omit to auto-detect the first MSP-capable FC.",
     )
     plan_source = parser.add_mutually_exclusive_group()
-    plan_source.add_argument("--vtx", choices=sorted(VTX_PLAN_FILENAMES), help="VTX band to test: 3.3, 5.8 or 7.2 GHz.")
+    plan_source.add_argument("--vtx", choices=sorted(VTX_PLAN_FILENAMES), help="VTX band to test: 1.2, 2.7, 3.3, 5.8 or 7.2 GHz.")
     plan_source.add_argument("--plan", type=Path, help="Three-point test plan JSON. Omit to select interactively.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
@@ -367,7 +413,6 @@ def main() -> int:
     csv_file = None
     csv_writer = None
     safe_reset_error: Exception | None = None
-    test_started = False
     last_requested_frequency: int | None = None
     try:
         port = resolve_port(args.port, args.baud, args.timeout)
@@ -388,22 +433,17 @@ def main() -> int:
         if not args.manual:
             print(f"Observation per point: {observation_time_s:g} s, every {sample_interval_s:g} s")
         print(f"The VTX will be returned to {safe_power['nominal_mw']} mW at the end.")
-        prompt = "Start manual switching? [y/N]: " if args.manual else f"Start the {test_power['nominal_mw']} mW test? [y/N]: "
-        if input(prompt).strip().lower() not in {"y", "yes", "т", "так"}:
-            print("Cancelled. VTX settings were not changed.")
-            return 0
-
         with open_serial(port, args.baud, args.timeout) as serial_port:
             client = MspClient(serial_port, args.timeout)
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
-            print("Loading the selected VTX table into Flight Controller...")
-            current = upload_vtx_table(client, current, profile, settle_time_s=settle_time_s)
+            print("Verifying the Flight Controller VTX table (read-only)...")
+            verify_vtx_table(client, current, profile)
             print(
-                f"VTX table ready: {current['vtx_table_bands']} bands, "
-                f"{current['vtx_table_power_levels']} power levels."
+                f"VTX table matches: {current['vtx_table_bands']} bands, "
+                f"{current['vtx_table_channels']} channels, "
+                f"{current['vtx_table_power_levels']} power levels. Persistent FC configuration unchanged."
             )
-            test_started = True
 
             try:
                 if args.manual:
@@ -452,6 +492,7 @@ def main() -> int:
                     print(f"Sample log: {csv_path}")
                     sensor = NrpzSensor(args.dll)
                     sensor.open(args.resource)
+                    results: list[tuple[dict[str, Any], dict[str, float | int]]] = []
                     for point in plan["points"]:
                         band = list(profile["bands"]).index(point["band"]) + 1
                         last_requested_frequency = point["frequency_mhz"]
@@ -461,7 +502,7 @@ def main() -> int:
                             frequency_mhz=point["frequency_mhz"], power_index=test_power["index"],
                             settle_time_s=settle_time_s,
                         )
-                        measure_and_report_point(
+                        summary = measure_and_report_point(
                             sensor,
                             point,
                             power_index=test_power["index"],
@@ -473,7 +514,9 @@ def main() -> int:
                             thresholds_percent=thresholds_percent,
                             use_color=use_color,
                         )
+                        results.append((point, summary))
                         csv_file.flush()
+                    print_reference_chart(results, thresholds_percent, use_color=use_color)
             finally:
                 sensor_close_error: NrpzError | None = None
                 if sensor is not None:

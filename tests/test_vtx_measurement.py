@@ -8,17 +8,18 @@ from vtx_three_point_test import (
     ANSI_RED,
     ANSI_YELLOW,
     format_power,
-    build_vtx_table_band_payload,
-    build_vtx_table_power_payload,
     measure_and_report_point,
     power_color,
+    reference_chart_line,
     select_manual_point,
     summarize_readings,
+    verify_vtx_table,
 )
+from vtx_msp_probe import MSP_VTXTABLE_BAND, MSP_VTXTABLE_POWERLEVEL, MspError
 from unittest.mock import patch
 
 
-class VtxA1MeasureTests(unittest.TestCase):
+class VtxMeasurementTests(unittest.TestCase):
     def test_preserves_power_and_builds_explicit_a1_payload(self):
         current = {
             "power_index": 2,
@@ -27,8 +28,8 @@ class VtxA1MeasureTests(unittest.TestCase):
             "pit_mode_frequency_mhz": 0,
         }
         payload = build_set_vtx_config_payload(current, band=1, channel=1, frequency_mhz=3330)
-        self.assertEqual(payload, bytes((0, 0, 2, 0, 0, 0, 0, 1, 1, 0x02, 0x0D, 0, 0, 0, 0)))
-        self.assertEqual(len(payload), 15)
+        self.assertEqual(payload, bytes((0, 0, 2, 0, 0, 0, 0, 1, 1, 0x02, 0x0D)))
+        self.assertEqual(len(payload), 11)
 
     def test_rejects_invalid_band_or_channel(self):
         current = {
@@ -60,7 +61,7 @@ class VtxA1MeasureTests(unittest.TestCase):
         payload = build_set_vtx_config_payload(current, band=9, channel=1, frequency_mhz=4867, power_index=4)
         self.assertEqual(payload[:2], b"\0\0")
         self.assertEqual(payload[7:9], bytes((9, 1)))
-        self.assertEqual(len(payload), 15)
+        self.assertEqual(len(payload), 11)
 
     def test_encodes_direct_frequency_for_extra_band(self):
         current = {
@@ -74,7 +75,7 @@ class VtxA1MeasureTests(unittest.TestCase):
         )
         self.assertEqual(payload[:2], (4867).to_bytes(2, "little"))
         self.assertEqual(payload[7:9], b"\0\0")
-        self.assertEqual(len(payload), 15)
+        self.assertEqual(len(payload), 11)
 
     def test_summarizes_power_drop(self):
         summary = summarize_readings([(0.0, 7000.0), (0.5, 6900.0), (1.0, 6800.0)])
@@ -94,6 +95,13 @@ class VtxA1MeasureTests(unittest.TestCase):
             format_power(900, 1000, {"green_min": 90.0, "yellow_min": 80.0}, use_color=False),
             "900 mW",
         )
+
+    def test_reference_chart_marks_target_and_reports_status(self):
+        point = {"band": "A", "channel": 1, "frequency_mhz": 1080, "reference_output_mw": 1000}
+        line = reference_chart_line(point, 900, {"green_min": 90.0, "yellow_min": 80.0}, use_color=False)
+        self.assertIn("│", line)
+        self.assertIn("900 / 1000 mW", line)
+        self.assertIn("(90%) OK", line)
 
     def test_manual_mode_selects_a_configured_point_or_finishes(self):
         points = [
@@ -118,20 +126,56 @@ class VtxA1MeasureTests(unittest.TestCase):
         writer = csv.writer(output)
         point = {"band": "D", "channel": 5, "frequency_mhz": 5510, "reference_output_mw": 4550}
         with patch("vtx_three_point_test.observe_power", return_value=[(0.0, 4500.0), (0.5, 4600.0)]):
-            measure_and_report_point(
+            summary = measure_and_report_point(
                 sensor, point, power_index=4, timeout_ms=5000, observation_time_s=5, sample_interval_s=0.5,
                 averages=16, csv_writer=writer, thresholds_percent={"green_min": 90.0, "yellow_min": 80.0},
                 use_color=False,
             )
         self.assertEqual(sensor.frequency_hz, 5_510_000_000)
         self.assertIn("5510", output.getvalue())
+        self.assertEqual(summary["average_mw"], 4550.0)
 
-    def test_builds_betaflight_vtx_table_payloads(self):
-        self.assertEqual(build_vtx_table_power_payload(4, 4000), b"\x04\xa0\x0f\x044000")
-        self.assertEqual(
-            build_vtx_table_band_payload(7, "X", [4990, 5020]),
-            b"\x07\x01X\x58\x00\x02\x7e\x13\x9c\x13",
-        )
+    def test_verifies_complete_vtx_table_without_writing(self):
+        profile = {
+            "bands": {"A": [1000, 1100], "B": [1200, 1300]},
+            "power_levels_mw": [0, 25, 2000, 4000],
+        }
+
+        class ReadOnlyClient:
+            def __init__(self):
+                self.commands = []
+
+            def request(self, command, payload=b""):
+                self.commands.append(command)
+                index = payload[0]
+                if command == MSP_VTXTABLE_BAND:
+                    letter, frequencies = list(profile["bands"].items())[index - 1]
+                    name = letter.encode("ascii").ljust(8, b"\0")
+                    return (
+                        bytes((index, 8)) + name + bytes((ord(letter), 0, len(frequencies)))
+                        + b"".join(frequency.to_bytes(2, "little") for frequency in frequencies)
+                    )
+                if command == MSP_VTXTABLE_POWERLEVEL:
+                    value = profile["power_levels_mw"][index - 1]
+                    label = ("PIT" if value == 0 else str(value)).encode("ascii").ljust(8, b"\0")
+                    return bytes((index,)) + value.to_bytes(2, "little") + bytes((8,)) + label
+                raise AssertionError(f"Unexpected write command {command}")
+
+        client = ReadOnlyClient()
+        current = {"vtx_table_bands": 2, "vtx_table_channels": 2, "vtx_table_power_levels": 4}
+        verify_vtx_table(client, current, profile)
+        self.assertEqual(client.commands, [137, 137, 138, 138, 138, 138])
+
+    def test_rejects_wrong_vtx_table_without_attempting_a_write(self):
+        profile = {"bands": {"A": [1000, 1100]}, "power_levels_mw": [0, 25, 2000, 4000]}
+
+        class NoWriteClient:
+            def request(self, command, payload=b""):
+                raise AssertionError(f"No MSP command expected, got {command}")
+
+        current = {"vtx_table_bands": 0, "vtx_table_channels": 0, "vtx_table_power_levels": 0}
+        with self.assertRaisesRegex(MspError, "FC settings were not changed"):
+            verify_vtx_table(NoWriteClient(), current, profile)
 
 
 if __name__ == "__main__":

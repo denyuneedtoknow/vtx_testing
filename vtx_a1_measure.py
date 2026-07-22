@@ -44,7 +44,6 @@ def build_set_vtx_config_payload(
     frequency_mhz: int,
     power_index: int | None = None,
     direct_frequency: bool = False,
-    vtx_table: tuple[int, int, int, bool] | None = None,
 ) -> bytes:
     """Create a Betaflight API >= 1.42 MSP_SET_VTX_CONFIG payload."""
     if not 1 <= band <= 255 or not 1 <= channel <= 8:
@@ -70,14 +69,11 @@ def build_set_vtx_config_payload(
     if not all(isinstance(value, (int, bool)) for value in (selected_power_index, pit_mode, low_power_disarm, pit_frequency)):
         raise ValueError("Current VTX configuration is incomplete.")
 
-    table_bands, table_channels, table_power_levels, table_clear = vtx_table or (0, 0, 0, False)
-    if not all(0 <= value <= 8 for value in (table_bands, table_channels, table_power_levels)):
-        raise ValueError("VTX table counts must be in the range 0..8.")
-
-    # Betaflight 4.5 consumes 15 bytes: the legacy fields, the API 1.42
-    # band/channel extension, and four VTX-table count/clear fields.
+    # Send only the 11 VTX-setting bytes. Betaflight accepts an optional four-byte
+    # VTX-table extension, but this tester deliberately omits it so it can never
+    # change the Flight Controller's table dimensions or clear the table.
     return struct.pack(
-        "<HBBBHBBHBBBB",
+        "<HBBBHBBH",
         packed_band_channel,
         int(selected_power_index),
         int(bool(pit_mode)),
@@ -86,10 +82,6 @@ def build_set_vtx_config_payload(
         explicit_band,
         explicit_channel,
         frequency_mhz,
-        table_bands,
-        table_channels,
-        table_power_levels,
-        int(table_clear),
     )
 
 
