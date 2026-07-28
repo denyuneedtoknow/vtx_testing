@@ -54,7 +54,7 @@ class VtxProfileTests(unittest.TestCase):
 
     def test_new_plans_use_the_supported_1_2_and_2_7_points(self):
         expected_points = {
-            "ft_vtx_1_2_three_point_4w.json": [("A", 1, 1080), ("A", 4, 1200), ("A", 8, 1320)],
+            "ft_vtx_1_2_three_point_4w.json": [("A", 1, 1080), ("A", 4, 1200), ("A", 7, 1320)],
             "ft_vtx_2_7_three_point_4w.json": [("A", 1, 2700), ("B", 1, 2860), ("B", 8, 3000)],
         }
         for plan_name, expected in expected_points.items():

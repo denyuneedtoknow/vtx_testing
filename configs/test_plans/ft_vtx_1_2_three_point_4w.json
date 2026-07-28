@@ -28,7 +28,7 @@
     },
     {
       "band": "A",
-      "channel": 8,
+      "channel": 7,
       "frequency_mhz": 1320,
       "reference_output_mw": 4020
     }

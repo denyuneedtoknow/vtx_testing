@@ -166,6 +166,62 @@ class VtxMeasurementTests(unittest.TestCase):
         verify_vtx_table(client, current, profile)
         self.assertEqual(client.commands, [137, 137, 138, 138, 138, 138])
 
+    def test_accepts_firmware_specific_off_power_value_when_label_is_zero(self):
+        profile = {"bands": {"A": [1000]}, "power_levels_mw": [0, 25, 2000, 4000]}
+
+        class ReadOnlyClient:
+            def request(self, command, payload=b""):
+                index = payload[0]
+                if command == MSP_VTXTABLE_BAND:
+                    return bytes((index, 1)) + b"A" + bytes((0, 0, 1)) + (1000).to_bytes(2, "little")
+                if command == MSP_VTXTABLE_POWERLEVEL:
+                    value, label = ((9, b"0"), (25, b"25"), (2000, b"2W"), (4000, b"4W"))[index - 1]
+                    return bytes((index,)) + value.to_bytes(2, "little") + bytes((len(label),)) + label
+                raise AssertionError(f"Unexpected command {command}")
+
+        verify_vtx_table(
+            ReadOnlyClient(),
+            {"vtx_table_bands": 1, "vtx_table_channels": 1, "vtx_table_power_levels": 4},
+            profile,
+        )
+
+    def test_accepts_different_band_letter_when_frequencies_match(self):
+        profile = {"bands": {"A": [1000]}, "power_levels_mw": [0]}
+
+        class ReadOnlyClient:
+            def request(self, command, payload=b""):
+                if command == MSP_VTXTABLE_BAND:
+                    return bytes((1, 8)) + b"BOSCAM_A" + bytes((ord("B"), 1, 1)) + (1000).to_bytes(2, "little")
+                if command == MSP_VTXTABLE_POWERLEVEL:
+                    return bytes((1,)) + (9).to_bytes(2, "little") + bytes((1,)) + b"0"
+                raise AssertionError(f"Unexpected command {command}")
+
+        verify_vtx_table(
+            ReadOnlyClient(),
+            {"vtx_table_bands": 1, "vtx_table_channels": 1, "vtx_table_power_levels": 1},
+            profile,
+        )
+
+    def test_rejects_incorrect_power_values_even_when_labels_claim_watts(self):
+        profile = {"bands": {"A": [1000]}, "power_levels_mw": [0, 25, 2000, 4000]}
+
+        class ReadOnlyClient:
+            def request(self, command, payload=b""):
+                index = payload[0]
+                if command == MSP_VTXTABLE_BAND:
+                    return bytes((index, 1)) + b"A" + bytes((0, 0, 1)) + (1000).to_bytes(2, "little")
+                if command == MSP_VTXTABLE_POWERLEVEL:
+                    value, label = ((9, b"0"), (25, b"25"), (200, b"2W"), (400, b"4W"))[index - 1]
+                    return bytes((index,)) + value.to_bytes(2, "little") + bytes((len(label),)) + label
+                raise AssertionError(f"Unexpected command {command}")
+
+        with self.assertRaisesRegex(MspError, r"expected \[0, 25, 2000, 4000\]; got \[9, 25, 200, 400\]"):
+            verify_vtx_table(
+                ReadOnlyClient(),
+                {"vtx_table_bands": 1, "vtx_table_channels": 1, "vtx_table_power_levels": 4},
+                profile,
+            )
+
     def test_rejects_wrong_vtx_table_without_attempting_a_write(self):
         profile = {"bands": {"A": [1000, 1100]}, "power_levels_mw": [0, 25, 2000, 4000]}
 

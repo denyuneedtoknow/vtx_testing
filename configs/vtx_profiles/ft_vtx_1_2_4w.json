@@ -1,12 +1,13 @@
 {
   "id": "ft-vtx-1-2-4w",
   "manufacturer": "FT Systems",
-  "model": "FT VTX 1.2GHz 4W (8 channels via Betaflight)",
+  "model": "FT VTX 1.2GHz 4W (9 frequencies via two Betaflight bands)",
   "control_protocol": "irc_tramp",
   "source_url": "https://ft.systems/videoperedavach-vtx-ft-1-2/",
-  "frequency_range_mhz": [1080, 1320],
+  "frequency_range_mhz": [1080, 1360],
   "power_levels_mw": [0, 25, 2000, 4000],
   "bands": {
-    "A": [1080, 1120, 1160, 1200, 1240, 1258, 1280, 1320]
+    "A": [1080, 1120, 1160, 1200, 1240, 1280, 1320, 1360],
+    "B": [1258, 0, 0, 0, 0, 0, 0, 0]
   }
 }

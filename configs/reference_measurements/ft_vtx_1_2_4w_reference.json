@@ -3,8 +3,9 @@
   "power_index": 4,
   "nominal_power_mw": 4000,
   "unit": "mW",
-  "description": "Reference values transcribed from the supplied FT VTX 1.2 GHz 4 W table on 2026-07-21. A9/1360 MHz is excluded because Betaflight supports only eight channels per band.",
+  "description": "Reference values transcribed from the supplied FT VTX 1.2 GHz 4 W table on 2026-07-21. Betaflight stores 1258 MHz as B1; 1360 MHz was not measured. Null denotes a non-frequency table slot or an unavailable measurement.",
   "bands": {
-    "A": [3680, 4560, 4780, 4870, 4670, 4460, 4230, 4020]
+    "A": [3680, 4560, 4780, 4870, 4670, 4230, 4020, null],
+    "B": [4460, null, null, null, null, null, null, null]
   }
 }
