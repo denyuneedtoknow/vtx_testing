@@ -14,6 +14,7 @@ import sys
 import time
 from pathlib import Path
 
+from measurement_path import load_measurement_path, offset_db_at_frequency
 from vtx_msp_probe import (
     MSP_SET_VTX_CONFIG,
     MSP_VTX_CONFIG,
@@ -107,6 +108,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-ms", type=int, default=5_000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
     parser.add_argument("--resource", default="*", help="NRP-Z11 VISA resource, or * for the first sensor.")
     parser.add_argument("--dll", help="Path to rsnrpz_64.dll.")
+    parser.add_argument(
+        "--measurement-path",
+        type=Path,
+        default=Path(__file__).with_name("configs") / "measurement_path_control.json",
+        help="Frequency-dependent measurement-path calibration JSON.",
+    )
     args = parser.parse_args()
     if args.baud <= 0 or args.timeout <= 0 or args.settle_time < 0 or args.averages <= 0 or args.timeout_ms <= 0:
         parser.error("baud, timeout, averages and timeout-ms must be positive; settle-time cannot be negative.")
@@ -122,6 +129,8 @@ def main() -> int:
         else:
             profile = load_profile(args.profile)
         target_frequency = load_a1_frequency(profile)
+        measurement_path = load_measurement_path(args.measurement_path)
+        level_offset_db = offset_db_at_frequency(measurement_path, target_frequency)
         print(f"Selected VTX: {profile['model']}")
         with open_serial(port, args.baud, args.timeout) as serial_port:
             client = MspClient(serial_port, args.timeout)
@@ -148,10 +157,14 @@ def main() -> int:
         try:
             sensor.open(args.resource)
             sensor.configure(target_frequency * 1_000_000, args.averages)
-            milliwatts = watts_to_millwatts(sensor.read_watts(args.timeout_ms))
+            sensor.set_level_offset(level_offset_db)
+            vtx_output_mw = watts_to_millwatts(sensor.read_watts(args.timeout_ms))
         finally:
             sensor.close()
-        print(f"Power at A1 ({target_frequency} MHz): {milliwatts:.0f} mW")
+        print(
+            f"Power at A1 ({target_frequency} MHz): {vtx_output_mw:.0f} mW VTX output "
+            f"(NRP Level Offset {level_offset_db:+.2f} dB)"
+        )
         return 0
     except (MspError, NrpzError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

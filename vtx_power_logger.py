@@ -60,6 +60,10 @@ class NrpzSensor:
         self._dll.rsnrpz_chan_mode.restype = c_int32
         self._dll.rsnrpz_chan_setCorrectionFrequency.argtypes = [c_uint32, c_uint16, c_double]
         self._dll.rsnrpz_chan_setCorrectionFrequency.restype = c_int32
+        self._dll.rsnrpz_corr_setOffset.argtypes = [c_uint32, c_uint16, c_double]
+        self._dll.rsnrpz_corr_setOffset.restype = c_int32
+        self._dll.rsnrpz_corr_setOffsetEnabled.argtypes = [c_uint32, c_uint16, c_uint16]
+        self._dll.rsnrpz_corr_setOffsetEnabled.restype = c_int32
         self._dll.rsnrpz_trigger_setSource.argtypes = [c_uint32, c_uint16, c_int32]
         self._dll.rsnrpz_trigger_setSource.restype = c_int32
         self._dll.rsnrpz_avg_configureAvgManual.argtypes = [c_uint32, c_uint16, c_uint32]
@@ -100,6 +104,17 @@ class NrpzSensor:
         )
         self._check(self._dll.rsnrpz_trigger_setSource(self._session, self.CHANNEL, self.TRIGGER_IMMEDIATE), "Setting trigger")
         self._check(self._dll.rsnrpz_avg_configureAvgManual(self._session, self.CHANNEL, averages), "Setting averaging")
+
+    def set_level_offset(self, offset_db: float) -> None:
+        """Explicitly set the full external-path correction used by the NRP-Z11."""
+        self._check(
+            self._dll.rsnrpz_corr_setOffset(self._session, self.CHANNEL, offset_db),
+            "Setting Level Offset",
+        )
+        self._check(
+            self._dll.rsnrpz_corr_setOffsetEnabled(self._session, self.CHANNEL, 1),
+            "Enabling Level Offset",
+        )
 
     def read_watts(self, timeout_ms: int) -> float:
         value = c_double()

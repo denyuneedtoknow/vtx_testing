@@ -17,6 +17,7 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
+from measurement_path import load_measurement_path, offset_db_at_frequency
 from vtx_a1_measure import build_set_vtx_config_payload, format_vtx
 from vtx_msp_probe import (
     MSP_SET_VTX_CONFIG,
@@ -218,6 +219,43 @@ def observe_power(sensor: NrpzSensor, timeout_ms: int, duration_s: float, interv
         time.sleep(min(max(0, interval_s - (now - reading_started)), deadline - now))
 
 
+def wait_for_stable_power(
+    sensor: NrpzSensor,
+    *,
+    timeout_ms: int,
+    sample_interval_s: float,
+    required_samples: int,
+    tolerance_percent: float,
+    max_wait_s: float,
+) -> list[float]:
+    """Wait until consecutive readings have a bounded peak-to-peak spread."""
+    if required_samples < 2 or tolerance_percent <= 0 or max_wait_s <= 0 or sample_interval_s < 0:
+        raise ValueError("Invalid stability settings.")
+    deadline = time.monotonic() + max_wait_s
+    readings: list[float] = []
+    while True:
+        reading_mw = watts_to_millwatts(sensor.read_watts(timeout_ms))
+        readings.append(reading_mw)
+        recent = readings[-required_samples:]
+        if len(recent) == required_samples:
+            mean_mw = fmean(recent)
+            spread_percent = (max(recent) - min(recent)) / mean_mw * 100 if mean_mw else float("inf")
+            if spread_percent <= tolerance_percent:
+                return recent
+        if time.monotonic() >= deadline:
+            latest = readings[-required_samples:]
+            if latest:
+                mean_mw = fmean(latest)
+                spread_percent = (max(latest) - min(latest)) / mean_mw * 100 if mean_mw else float("inf")
+                raise MspError(
+                    f"VTX output did not stabilize within {max_wait_s:g} s: "
+                    f"last {len(latest)} readings span {spread_percent:.1f}% (limit {tolerance_percent:.1f}%)."
+                )
+            raise MspError("VTX output did not stabilize.")
+        if sample_interval_s:
+            time.sleep(sample_interval_s)
+
+
 def summarize_readings(readings: list[tuple[float, float]]) -> dict[str, float | int]:
     if not readings:
         raise ValueError("Cannot summarize zero readings.")
@@ -341,7 +379,8 @@ def create_csv_writer(path: Path):
     file = path.open("w", newline="", encoding="utf-8")
     writer = csv.writer(file)
     writer.writerow([
-        "timestamp_utc", "frequency_mhz", "band", "channel", "power_index", "sample_elapsed_s", "sensor_input_mw"
+        "timestamp_utc", "frequency_mhz", "band", "channel", "power_index", "sample_elapsed_s",
+        "level_offset_db", "vtx_output_mw"
     ])
     return file, writer
 
@@ -358,15 +397,16 @@ def measure_and_report_point(
     csv_writer,
     thresholds_percent: dict[str, float],
     use_color: bool,
+    level_offset_db: float = 0.0,
 ) -> dict[str, float | int]:
     """Measure one active VTX point, write samples, and display its summary."""
     sensor.configure(point["frequency_mhz"] * 1_000_000, averages)
     readings = observe_power(sensor, timeout_ms, observation_time_s, sample_interval_s)
-    for sample_elapsed_s, raw_mw in readings:
+    for sample_elapsed_s, output_mw in readings:
         csv_writer.writerow([
             datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             point["frequency_mhz"], point["band"], point["channel"], power_index,
-            f"{sample_elapsed_s:.3f}", f"{raw_mw:.6f}",
+            f"{sample_elapsed_s:.3f}", f"{level_offset_db:.6f}", f"{output_mw:.6f}",
         ])
     summary = summarize_readings(readings)
     reference_output_mw = point.get("reference_output_mw")
@@ -375,7 +415,7 @@ def measure_and_report_point(
         if isinstance(reference_output_mw, (int, float)) else ""
     )
     print(
-        "Sensor input: "
+        "VTX output (path-corrected): "
         f"avg {format_power(summary['average_mw'], reference_output_mw, thresholds_percent, use_color=use_color)}, "
         f"min {format_power(summary['minimum_mw'], reference_output_mw, thresholds_percent, use_color=use_color)}, "
         f"max {format_power(summary['maximum_mw'], reference_output_mw, thresholds_percent, use_color=use_color)}, "
@@ -399,6 +439,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--averages", type=int, default=16, help="NRP-Z11 manual averages (default: 16).")
     parser.add_argument("--timeout-ms", type=int, default=5_000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
+    parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a point is considered stable (default: 3).")
+    parser.add_argument("--stability-tolerance-percent", type=float, default=2.0, help="Maximum peak-to-peak spread for stable readings (default: 2).")
+    parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
     parser.add_argument("--resource", default="*", help="NRP-Z11 VISA resource, or * for the first sensor.")
     parser.add_argument("--dll", help="Path to rsnrpz_64.dll.")
     parser.add_argument("--csv", type=Path, help="Write all samples to this CSV file. Default: logs/<timestamp>.csv.")
@@ -409,8 +452,9 @@ def parse_args() -> argparse.Namespace:
         help="Manually select the plan's points, measuring each selection with NRP-Z11; returns VTX to 25 mW on exit.",
     )
     args = parser.parse_args()
-    if args.baud <= 0 or args.timeout <= 0 or args.averages <= 0 or args.timeout_ms <= 0:
-        parser.error("baud, timeout, averages and timeout-ms must be positive.")
+    if (args.baud <= 0 or args.timeout <= 0 or args.averages <= 0 or args.timeout_ms <= 0
+            or args.stability_samples < 2 or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0):
+        parser.error("baud, timeout, averages, timeout-ms, stability-samples, stability-tolerance-percent and stability-timeout-s must be positive; stability-samples must be at least 2.")
     return args
 
 
@@ -426,6 +470,10 @@ def main() -> int:
         plan_path = plan_for_vtx(args.vtx) if args.vtx else args.plan or select_plan()
         plan = load_plan(plan_path)
         profile = plan["_profile"]
+        measurement_path_value = plan.get("measurement_path_profile")
+        if not isinstance(measurement_path_value, str):
+            raise ValueError("Test plan is missing measurement_path_profile.")
+        measurement_path = load_measurement_path(plan_path.parent / measurement_path_value)
         settle_time_s = float(plan["settle_time_s"])
         observation_time_s = float(plan["observation_time_s"])
         sample_interval_s = float(plan["sample_interval_s"])
@@ -480,6 +528,14 @@ def main() -> int:
                             settle_time_s=settle_time_s,
                         )
                         print(f"Active VTX: {format_vtx(current)}")
+                        level_offset_db = offset_db_at_frequency(measurement_path, point["frequency_mhz"])
+                        sensor.set_level_offset(level_offset_db)
+                        stable_readings = wait_for_stable_power(
+                            sensor, timeout_ms=args.timeout_ms, sample_interval_s=sample_interval_s,
+                            required_samples=args.stability_samples,
+                            tolerance_percent=args.stability_tolerance_percent, max_wait_s=args.stability_timeout_s,
+                        )
+                        print(f"VTX output stable: {fmean(stable_readings):.0f} mW over {len(stable_readings)} readings.")
                         measure_and_report_point(
                             sensor,
                             point,
@@ -491,6 +547,7 @@ def main() -> int:
                             csv_writer=csv_writer,
                             thresholds_percent=thresholds_percent,
                             use_color=use_color,
+                            level_offset_db=level_offset_db,
                         )
                         csv_file.flush()
                 else:
@@ -509,6 +566,14 @@ def main() -> int:
                             frequency_mhz=point["frequency_mhz"], power_index=test_power["index"],
                             settle_time_s=settle_time_s,
                         )
+                        level_offset_db = offset_db_at_frequency(measurement_path, point["frequency_mhz"])
+                        sensor.set_level_offset(level_offset_db)
+                        stable_readings = wait_for_stable_power(
+                            sensor, timeout_ms=args.timeout_ms, sample_interval_s=sample_interval_s,
+                            required_samples=args.stability_samples,
+                            tolerance_percent=args.stability_tolerance_percent, max_wait_s=args.stability_timeout_s,
+                        )
+                        print(f"VTX output stable: {fmean(stable_readings):.0f} mW over {len(stable_readings)} readings.")
                         summary = measure_and_report_point(
                             sensor,
                             point,
@@ -520,6 +585,7 @@ def main() -> int:
                             csv_writer=csv_writer,
                             thresholds_percent=thresholds_percent,
                             use_color=use_color,
+                            level_offset_db=level_offset_db,
                         )
                         results.append((point, summary))
                         csv_file.flush()

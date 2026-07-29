@@ -13,6 +13,7 @@ from vtx_three_point_test import (
     reference_chart_line,
     select_manual_point,
     summarize_readings,
+    wait_for_stable_power,
     verify_vtx_table,
 )
 from vtx_msp_probe import MSP_VTXTABLE_BAND, MSP_VTXTABLE_POWERLEVEL, MspError
@@ -83,6 +84,20 @@ class VtxMeasurementTests(unittest.TestCase):
         self.assertEqual(summary["average_mw"], 6900.0)
         self.assertEqual(summary["minimum_mw"], 6800.0)
         self.assertEqual(summary["change_mw"], -200.0)
+
+    def test_waits_for_consecutive_stable_readings(self):
+        class Sensor:
+            def __init__(self):
+                self.values = iter((0.200, 0.110, 0.101, 0.100, 0.099))
+
+            def read_watts(self, timeout_ms):
+                return next(self.values)
+
+        readings = wait_for_stable_power(
+            Sensor(), timeout_ms=100, sample_interval_s=0, required_samples=3,
+            tolerance_percent=2.1, max_wait_s=1,
+        )
+        self.assertEqual(readings, [101.0, 100.0, 99.0])
 
     def test_colors_power_against_reference_thresholds(self):
         thresholds = {"green_min": 90.0, "yellow_min": 80.0}
