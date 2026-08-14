@@ -229,6 +229,19 @@ python .\vtx_three_point_test.py --vtx 1.2
 python .\vtx_power_table_measure.py --vtx 5.8 --samples 3
 ```
 
+Для трьох нових Betaflight VTX tables 4.9–7.2 GHz використовуйте один із
+профілів `low`, `mid` або `high`:
+
+```powershell
+python .\vtx_power_table_measure.py --vtx low --samples 3
+python .\vtx_power_table_measure.py --vtx mid --samples 3
+python .\vtx_power_table_measure.py --vtx high --samples 3
+```
+
+Перед перемиканням скрипт read-only звіряє кількість бендів, каналів, усі
+частоти й power levels із обраною таблицею. LOW вимірює 64 канали, MID та HIGH
+— по 56; для кожного профілю вимірюються 25 mW, 2 W і 4 W.
+
 За замовчуванням CSV створюється у `logs/vtx-power-table-<UTC timestamp>.csv` і
 перезаписується після кожної завершеної комірки, тому вже виміряні значення не
 втрачаються при перериванні. Файл має роздільник `;`, щоб одразу коректно

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import time
 from datetime import datetime, timezone
@@ -21,7 +22,36 @@ from measurement_path import load_measurement_path, offset_db_at_frequency
 from vtx_a1_measure import format_vtx
 from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
-from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, load_plan, switch_and_confirm, verify_vtx_table, wait_for_stable_power
+from vtx_profiles import load_profile
+from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, switch_and_confirm, verify_vtx_table, wait_for_stable_power
+
+
+# The original VTX options reuse their three-point plans because those plans
+# also contain the measurement-path and settling settings.  The three new
+# Betaflight tables have dedicated full-table plans: they deliberately do not
+# need reference values or three-point test settings.
+POWER_TABLE_PLAN_FILENAMES = {
+    **VTX_PLAN_FILENAMES,
+    "low": "vtx_4_9_7_2_low_full_table_4w.json",
+    "mid": "vtx_4_9_7_2_mid_full_table_4w.json",
+    "high": "vtx_4_9_7_2_high_full_table_4w.json",
+}
+
+
+def load_power_table_plan(plan_path: Path) -> dict[str, Any]:
+    """Load settings required by a full VTX power-table measurement."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        profile_path = Path(plan["vtx_profile"])
+        measurement_path_profile = plan["measurement_path_profile"]
+        settle_time_s = float(plan["settle_time_s"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Cannot read full-table test plan {plan_path}: {exc}") from exc
+    if not isinstance(measurement_path_profile, str) or settle_time_s < 0:
+        raise ValueError("Full-table test plan has invalid measurement-path or settle-time settings.")
+    profile = load_profile(profile_path if profile_path.is_absolute() else plan_path.parent / profile_path)
+    plan["_profile"] = profile
+    return plan
 
 
 def measurement_points(profile: dict[str, Any]) -> list[dict[str, int | str]]:
@@ -86,11 +116,11 @@ def write_matrix(path: Path, points: list[dict[str, int | str]], powers: list[tu
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure all VTX channels and power levels into a CSV matrix.")
-    parser.add_argument("--vtx", choices=sorted(VTX_PLAN_FILENAMES), required=True, help="VTX profile: 1.2, 2.7, 3.3, 5.8 or 7.2 GHz.")
+    parser.add_argument("--vtx", choices=sorted(POWER_TABLE_PLAN_FILENAMES), required=True, help="VTX profile: 1.2, 2.7, 3.3, 5.8, 7.2, low, mid or high.")
     parser.add_argument("--port", help="Flight Controller COM port, for example COM35. Omit to auto-detect.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
-    parser.add_argument("--settle-time", type=float, help="Seconds to wait after each VTX switch (defaults to the three-point plan).")
+    parser.add_argument("--settle-time", type=float, help="Seconds to wait after each VTX switch (defaults to the selected plan).")
     parser.add_argument("--samples", type=int, default=3, help="Independent sensor readings to average per cell (default: 3).")
     parser.add_argument("--warmup-readings", type=int, default=1, help="Sensor readings to discard after each switch, before averaging (default: 1).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a cell is measured (default: 3).")
@@ -117,12 +147,13 @@ def main() -> int:
     sensor: NrpzSensor | None = None
     safe_reset_error: Exception | None = None
     try:
-        plan = load_plan(PLAN_DIRECTORY / VTX_PLAN_FILENAMES[args.vtx])
+        plan_path = PLAN_DIRECTORY / POWER_TABLE_PLAN_FILENAMES[args.vtx]
+        plan = load_power_table_plan(plan_path)
         profile = plan["_profile"]
         measurement_path_value = plan.get("measurement_path_profile")
         if not isinstance(measurement_path_value, str):
             raise ValueError("Test plan is missing measurement_path_profile.")
-        measurement_path = load_measurement_path(PLAN_DIRECTORY / measurement_path_value)
+        measurement_path = load_measurement_path(plan_path.parent / measurement_path_value)
         points = measurement_points(profile)
         powers = measurement_power_levels(profile)
         settle_time_s = float(plan["settle_time_s"]) if args.settle_time is None else args.settle_time

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from vtx_profiles import load_profile
 from vtx_three_point_test import load_plan, plan_for_vtx
+from vtx_power_table_measure import POWER_TABLE_PLAN_FILENAMES, load_power_table_plan, measurement_points, measurement_power_levels
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,16 @@ class VtxProfileTests(unittest.TestCase):
     def test_each_short_vtx_option_resolves_to_a_plan(self):
         for vtx in ("1.2", "2.7", "3.3", "5.8", "7.2"):
             self.assertTrue(plan_for_vtx(vtx).is_file())
+
+    def test_new_full_table_plans_match_their_betaflight_tables(self):
+        expected = {"low": (8, 64), "mid": (7, 56), "high": (7, 56)}
+        for vtx, (bands, channels) in expected.items():
+            with self.subTest(vtx=vtx):
+                plan = load_power_table_plan(ROOT / "configs/test_plans" / POWER_TABLE_PLAN_FILENAMES[vtx])
+                profile = plan["_profile"]
+                self.assertEqual(len(profile["bands"]), bands)
+                self.assertEqual(len(measurement_points(profile)), channels)
+                self.assertEqual(measurement_power_levels(profile), [(2, 25), (3, 2000), (4, 4000)])
 
 
 if __name__ == "__main__":

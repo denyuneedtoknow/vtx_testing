@@ -1,0 +1,6 @@
+{
+  "name": "VTX 4.9-7.2 GHz LOW: full power-table test",
+  "vtx_profile": "../vtx_profiles/vtx_4_9_7_2_low_4w.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "settle_time_s": 3.0
+}
