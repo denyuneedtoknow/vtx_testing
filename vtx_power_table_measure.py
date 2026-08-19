@@ -20,7 +20,7 @@ from typing import Any
 
 from measurement_path import load_measurement_path, offset_db_at_frequency
 from vtx_a1_measure import format_vtx
-from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, resolve_port
+from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, read_vtx_power_levels, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 from vtx_profiles import load_profile
 from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, switch_and_confirm, verify_vtx_table, wait_for_stable_power
@@ -35,6 +35,12 @@ POWER_TABLE_PLAN_FILENAMES = {
     "low": "vtx_4_9_7_2_low_full_table_4w.json",
     "mid": "vtx_4_9_7_2_mid_full_table_4w.json",
     "high": "vtx_4_9_7_2_high_full_table_4w.json",
+}
+DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES = {
+    "1.2.all": "ft_vtx_1_2_direct_sweep_4w.json",
+    "2.7.all": "ft_vtx_2_7_direct_sweep_4w.json",
+    "5.8.all": "vtx_4_9_7_2_direct_sweep_4w.json",
+    "4.9-7.2": "vtx_4_9_7_2_direct_sweep_4w.json",  # Backward-compatible alias.
 }
 
 
@@ -52,6 +58,43 @@ def load_power_table_plan(plan_path: Path) -> dict[str, Any]:
     profile = load_profile(profile_path if profile_path.is_absolute() else plan_path.parent / profile_path)
     plan["_profile"] = profile
     return plan
+
+
+def load_direct_frequency_sweep_plan(plan_path: Path) -> dict[str, Any]:
+    """Load a factory-frequency sweep that does not require an FC VTX table."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        profile = plan["profile"]
+        measurement_path_profile = plan["measurement_path_profile"]
+        settle_time_s = float(plan["settle_time_s"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Cannot read direct-frequency sweep plan {plan_path}: {exc}") from exc
+    if not isinstance(profile, dict) or not isinstance(measurement_path_profile, str) or settle_time_s < 0:
+        raise ValueError("Direct-frequency sweep plan has invalid settings.")
+    measurement_points(profile)
+    measurement_power_levels(profile)
+    plan["_profile"] = profile
+    return plan
+
+
+def verify_power_levels(client: MspClient, current: dict[str, int | bool | None], expected: list[int]) -> None:
+    """Verify only power levels, allowing direct frequencies outside the FC table."""
+    if current.get("vtx_table_power_levels") != len(expected):
+        raise MspError(
+            f"Flight Controller VTX power table does not match the direct sweep: expected {len(expected)} levels; "
+            f"got {current.get('vtx_table_power_levels')}. FC settings were not changed."
+        )
+    levels = read_vtx_power_levels(client, len(expected))
+    actual = [int(level["value"]) for level in levels]
+    matches = all(
+        value == wanted or (wanted == 0 and str(level["label"]).strip().upper() in {"0", "OFF", "PIT"})
+        for wanted, value, level in zip(expected, actual, levels)
+    )
+    if not matches:
+        raise MspError(
+            f"Flight Controller VTX power levels do not match the direct sweep: expected {expected}; got {actual}. "
+            "FC settings were not changed."
+        )
 
 
 def measurement_points(profile: dict[str, Any]) -> list[dict[str, int | str]]:
@@ -105,7 +148,7 @@ def write_matrix(path: Path, points: list[dict[str, int | str]], powers: list[tu
                 [
                     power_mw,
                     *[
-                        f"{values[(power_index, str(point['band']) + str(point['channel']))]:.2f}"
+                        f"{values[(power_index, str(point['band']) + str(point['channel']))]:.2f}".replace(".", ",")
                         if (power_index, str(point["band"]) + str(point["channel"])) in values
                         else ""
                         for point in points
@@ -116,7 +159,7 @@ def write_matrix(path: Path, points: list[dict[str, int | str]], powers: list[tu
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure all VTX channels and power levels into a CSV matrix.")
-    parser.add_argument("--vtx", choices=sorted(POWER_TABLE_PLAN_FILENAMES), required=True, help="VTX profile: 1.2, 2.7, 3.3, 5.8, 7.2, low, mid or high.")
+    parser.add_argument("--vtx", choices=sorted({*POWER_TABLE_PLAN_FILENAMES, *DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES}), required=True, help="VTX profile: 1.2, 1.2.all, 2.7, 2.7.all, 3.3, 5.8, 5.8.all, 7.2, low, mid or high.")
     parser.add_argument("--port", help="Flight Controller COM port, for example COM35. Omit to auto-detect.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
@@ -147,8 +190,9 @@ def main() -> int:
     sensor: NrpzSensor | None = None
     safe_reset_error: Exception | None = None
     try:
-        plan_path = PLAN_DIRECTORY / POWER_TABLE_PLAN_FILENAMES[args.vtx]
-        plan = load_power_table_plan(plan_path)
+        direct_frequency = args.vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
+        plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[args.vtx] if direct_frequency else POWER_TABLE_PLAN_FILENAMES[args.vtx])
+        plan = load_direct_frequency_sweep_plan(plan_path) if direct_frequency else load_power_table_plan(plan_path)
         profile = plan["_profile"]
         measurement_path_value = plan.get("measurement_path_profile")
         if not isinstance(measurement_path_value, str):
@@ -161,7 +205,7 @@ def main() -> int:
         values: dict[tuple[int, str], float] = {}
         write_matrix(output_path, points, powers, values)
 
-        print(f"Plan: full {profile['model']} power table")
+        print(f"Plan: {'direct-frequency sweep of' if direct_frequency else 'full'} {profile['model']} power table")
         print(f"{len(points)} channels × {len(powers)} power levels × {args.samples} averaged readings")
         print(f"Discarded warmup readings per cell: {args.warmup_readings}")
         print(f"Result matrix: {output_path}")
@@ -172,9 +216,14 @@ def main() -> int:
             client = MspClient(serial_port, args.timeout)
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
-            print("Verifying the Flight Controller VTX table (read-only)...")
-            verify_vtx_table(client, current, profile)
-            print("VTX table matches. Persistent FC configuration unchanged.")
+            if direct_frequency:
+                print("Verifying Flight Controller power levels (read-only; frequencies are sent directly)...")
+                verify_power_levels(client, current, list(profile["power_levels_mw"]))
+                print("Power levels match. FC frequency table is not used or changed.")
+            else:
+                print("Verifying the Flight Controller VTX table (read-only)...")
+                verify_vtx_table(client, current, profile)
+                print("VTX table matches. Persistent FC configuration unchanged.")
 
             try:
                 sensor = NrpzSensor(args.dll)
@@ -191,6 +240,7 @@ def main() -> int:
                             frequency_mhz=int(point["frequency_mhz"]),
                             power_index=power_index,
                             settle_time_s=settle_time_s,
+                            direct_frequency=direct_frequency,
                         )
                         sensor.configure(int(point["frequency_mhz"]) * 1_000_000, args.averages)
                         level_offset_db = offset_db_at_frequency(measurement_path, int(point["frequency_mhz"]))
@@ -222,14 +272,14 @@ def main() -> int:
                 try:
                     print("\nReturning VTX to 25 mW...")
                     latest = parse_vtx_config(client.request(MSP_VTX_CONFIG))
-                    frequency_mhz = int(latest["frequency_mhz"])
+                    frequency_mhz = int(latest["frequency_mhz"]) or int(points[-1]["frequency_mhz"])
                     band = int(latest["band"])
                     channel = int(latest["channel"])
-                    if not frequency_mhz or not 1 <= band <= 8 or not 1 <= channel <= 8:
+                    if not frequency_mhz or (not direct_frequency and (not 1 <= band <= 8 or not 1 <= channel <= 8)):
                         raise MspError("Flight Controller did not report a usable VTX setting for the 25 mW safety reset.")
                     current = switch_and_confirm(
-                        client, latest, band=band, channel=channel, frequency_mhz=frequency_mhz,
-                        power_index=2, settle_time_s=settle_time_s,
+                        client, latest, band=band or 1, channel=channel or 1, frequency_mhz=frequency_mhz,
+                        power_index=2, settle_time_s=settle_time_s, direct_frequency=direct_frequency,
                     )
                     print(f"Final VTX: {format_vtx(current)}")
                 except (MspError, ValueError) as exc:

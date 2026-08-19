@@ -1,0 +1,13 @@
+{
+  "name": "FT VTX 1.2 GHz: direct full-frequency sweep 4 W",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "settle_time_s": 3.0,
+  "profile": {
+    "model": "FT VTX 1.2GHz 4W (9 channels, direct frequency)",
+    "power_levels_mw": [0, 25, 2000, 4000],
+    "bands": {
+      "A": [1080, 1120, 1160, 1200, 1240, 1280, 1320, 1360],
+      "B": [1258]
+    }
+  }
+}

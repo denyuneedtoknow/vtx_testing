@@ -1,0 +1,13 @@
+{
+  "name": "FT VTX 2.7 GHz: direct full-frequency sweep 4 W",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "settle_time_s": 3.0,
+  "profile": {
+    "model": "FT VTX 2.7GHz 4W (16 channels, direct frequency)",
+    "power_levels_mw": [0, 25, 2000, 4000],
+    "bands": {
+      "A": [2700, 2720, 2740, 2760, 2780, 2800, 2820, 2840],
+      "B": [2860, 2880, 2900, 2920, 2940, 2960, 2980, 3000]
+    }
+  }
+}

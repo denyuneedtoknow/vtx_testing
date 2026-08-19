@@ -1,0 +1,62 @@
+{
+  "description": "Betaflight VTX Config file - FT 4.8-7.2GHz 4W - 64-channel lower/upper test table",
+  "version": "1.0",
+  "vtx_table": {
+    "bands_list": [
+      {
+        "name": "BAND_X",
+        "letter": "X",
+        "is_factory_band": false,
+        "frequencies": [4990, 5020, 5050, 5080, 5110, 5140, 5170, 5200]
+      },
+      {
+        "name": "BAND_D",
+        "letter": "D",
+        "is_factory_band": false,
+        "frequencies": [5362, 5399, 5436, 5473, 5510, 5547, 5584, 5621]
+      },
+      {
+        "name": "BAND_L",
+        "letter": "L",
+        "is_factory_band": false,
+        "frequencies": [5333, 5373, 5413, 5453, 5493, 5533, 5573, 5613]
+      },
+      {
+        "name": "BAND_E",
+        "letter": "E",
+        "is_factory_band": false,
+        "frequencies": [5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945]
+      },
+      {
+        "name": "BAND_A",
+        "letter": "A",
+        "is_factory_band": false,
+        "frequencies": [6110, 6130, 6150, 6170, 6190, 6210, 6230, 6250]
+      },
+      {
+        "name": "BAND_B",
+        "letter": "B",
+        "is_factory_band": false,
+        "frequencies": [6270, 6290, 6310, 6330, 6350, 6370, 6390, 6410]
+      },
+      {
+        "name": "BAND_F",
+        "letter": "F",
+        "is_factory_band": false,
+        "frequencies": [6590, 6610, 6630, 6650, 6670, 6690, 6710, 6730]
+      },
+      {
+        "name": "BAND_H",
+        "letter": "H",
+        "is_factory_band": false,
+        "frequencies": [7070, 7090, 7110, 7130, 7150, 7170, 7190, 7210]
+      }
+    ],
+    "powerlevels_list": [
+      { "value": 9, "label": "PIT" },
+      { "value": 25, "label": "25" },
+      { "value": 2000, "label": "200" },
+      { "value": 4000, "label": "400" }
+    ]
+  }
+}
