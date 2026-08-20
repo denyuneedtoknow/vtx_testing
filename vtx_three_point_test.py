@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean
-from typing import Any
+from typing import Any, Callable
 
 from measurement_path import load_measurement_path, offset_db_at_frequency
 from vtx_a1_measure import build_set_vtx_config_payload, format_vtx
@@ -202,10 +202,19 @@ def verify_vtx_table(
         )
 
 
-def observe_power(sensor: NrpzSensor, timeout_ms: int, duration_s: float, interval_s: float) -> list[tuple[float, float]]:
-    """Collect readings for a fixed observation interval as (elapsed seconds, mW)."""
+def observe_power(
+    sensor: NrpzSensor,
+    timeout_ms: int,
+    duration_s: float,
+    interval_s: float,
+    samples: int | None = None,
+    on_reading: Callable[[int, float], None] | None = None,
+) -> list[tuple[float, float]]:
+    """Collect readings for a fixed interval or an exact requested sample count."""
     if duration_s <= 0 or interval_s <= 0:
         raise ValueError("observation time and sample interval must be positive.")
+    if samples is not None and samples <= 0:
+        raise ValueError("samples must be positive.")
     started = time.monotonic()
     deadline = started + duration_s
     readings: list[tuple[float, float]] = []
@@ -213,10 +222,13 @@ def observe_power(sensor: NrpzSensor, timeout_ms: int, duration_s: float, interv
         reading_started = time.monotonic()
         milliwatts = watts_to_millwatts(sensor.read_watts(timeout_ms))
         readings.append((reading_started - started, milliwatts))
+        if on_reading is not None:
+            on_reading(len(readings), milliwatts)
         now = time.monotonic()
-        if now >= deadline:
+        if (samples is not None and len(readings) >= samples) or (samples is None and now >= deadline):
             return readings
-        time.sleep(min(max(0, interval_s - (now - reading_started)), deadline - now))
+        pause_s = max(0, interval_s - (now - reading_started))
+        time.sleep(pause_s if samples is not None else min(pause_s, deadline - now))
 
 
 def wait_for_stable_power(
@@ -398,10 +410,16 @@ def measure_and_report_point(
     thresholds_percent: dict[str, float],
     use_color: bool,
     level_offset_db: float = 0.0,
+    samples: int | None = None,
 ) -> dict[str, float | int]:
     """Measure one active VTX point, write samples, and display its summary."""
     sensor.configure(point["frequency_mhz"] * 1_000_000, averages)
-    readings = observe_power(sensor, timeout_ms, observation_time_s, sample_interval_s)
+    def report_sample(sample_index: int, output_mw: float) -> None:
+        print(f"Sample {sample_index}: {output_mw:.2f} mW", flush=True)
+
+    readings = observe_power(
+        sensor, timeout_ms, observation_time_s, sample_interval_s, samples=samples, on_reading=report_sample
+    )
     for sample_elapsed_s, output_mw in readings:
         csv_writer.writerow([
             datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -438,6 +456,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--averages", type=int, default=16, help="NRP-Z11 manual averages (default: 16).")
+    parser.add_argument("--samples", type=int, help="Exact readings to collect at each point; overrides the plan observation duration.")
     parser.add_argument("--timeout-ms", type=int, default=5_000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a point is considered stable (default: 3).")
     parser.add_argument("--stability-tolerance-percent", type=float, default=2.0, help="Maximum peak-to-peak spread for stable readings (default: 2).")
@@ -452,13 +471,19 @@ def parse_args() -> argparse.Namespace:
         help="Manually select the plan's points, measuring each selection with NRP-Z11; returns VTX to 25 mW on exit.",
     )
     args = parser.parse_args()
-    if (args.baud <= 0 or args.timeout <= 0 or args.averages <= 0 or args.timeout_ms <= 0
+    if (args.baud <= 0 or args.timeout <= 0 or args.averages <= 0 or args.timeout_ms <= 0 or (args.samples is not None and args.samples <= 0)
             or args.stability_samples < 2 or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0):
         parser.error("baud, timeout, averages, timeout-ms, stability-samples, stability-tolerance-percent and stability-timeout-s must be positive; stability-samples must be at least 2.")
     return args
 
 
 def main() -> int:
+    # A GUI receives this program through a pipe. Line buffering keeps every
+    # switching and sample event visible while the test is still in progress.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
     args = parse_args()
     sensor: NrpzSensor | None = None
     csv_file = None
@@ -548,6 +573,7 @@ def main() -> int:
                             thresholds_percent=thresholds_percent,
                             use_color=use_color,
                             level_offset_db=level_offset_db,
+                            samples=args.samples,
                         )
                         csv_file.flush()
                 else:
@@ -586,6 +612,7 @@ def main() -> int:
                             thresholds_percent=thresholds_percent,
                             use_color=use_color,
                             level_offset_db=level_offset_db,
+                            samples=args.samples,
                         )
                         results.append((point, summary))
                         csv_file.flush()

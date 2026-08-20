@@ -51,6 +51,7 @@ class VtxProfileTests(unittest.TestCase):
             [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
             [("X", 1, 4990), ("E", 8, 5945), ("H", 8, 7210)],
         )
+        self.assertEqual(plan["points"][1]["reference_output_mw"], 2400)
         self.assertEqual(set(plan["_profile"]["bands"]), {"X", "D", "L", "E", "A", "B", "F", "H"})
         self.assertEqual(plan["test_power"], {"index": 4, "nominal_mw": 4000})
 

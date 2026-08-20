@@ -9,6 +9,7 @@ from vtx_three_point_test import (
     ANSI_YELLOW,
     format_power,
     measure_and_report_point,
+    observe_power,
     power_color,
     reference_chart_line,
     select_manual_point,
@@ -21,6 +22,19 @@ from unittest.mock import patch
 
 
 class VtxMeasurementTests(unittest.TestCase):
+    def test_observe_power_uses_exact_requested_sample_count(self):
+        class Sensor:
+            def __init__(self):
+                self.reads = 0
+
+            def read_watts(self, timeout_ms):
+                self.reads += 1
+                return self.reads / 1_000
+
+        sensor = Sensor()
+        readings = observe_power(sensor, timeout_ms=1, duration_s=1, interval_s=0.000001, samples=3)
+        self.assertEqual([reading for _, reading in readings], [1.0, 2.0, 3.0])
+
     def test_preserves_power_and_builds_explicit_a1_payload(self):
         current = {
             "power_index": 2,

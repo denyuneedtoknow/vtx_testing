@@ -11,7 +11,7 @@
   "sample_interval_s": 0.5,
   "points": [
     { "band": "X", "channel": 1, "frequency_mhz": 4990, "reference_output_mw": 5020 },
-    { "band": "E", "channel": 8, "frequency_mhz": 5945, "reference_output_mw": 3740 },
+    { "band": "E", "channel": 8, "frequency_mhz": 5945, "reference_output_mw": 2400 },
     { "band": "H", "channel": 8, "frequency_mhz": 7210, "reference_output_mw": 4070 }
   ]
 }
