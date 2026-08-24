@@ -23,7 +23,14 @@ from vtx_a1_measure import format_vtx
 from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, read_vtx_power_levels, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 from vtx_profiles import load_profile
-from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, switch_and_confirm, verify_vtx_table, wait_for_stable_power
+from vtx_three_point_test import (
+    PLAN_DIRECTORY,
+    VTX_PLAN_FILENAMES,
+    install_soft_interrupt_handler,
+    switch_and_confirm,
+    verify_vtx_table,
+    wait_for_stable_power,
+)
 
 
 # The original VTX options reuse their three-point plans because those plans
@@ -186,6 +193,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    install_soft_interrupt_handler()
     args = parse_args()
     sensor: NrpzSensor | None = None
     safe_reset_error: Exception | None = None
@@ -289,6 +297,9 @@ def main() -> int:
             raise MspError("Measurement finished, but the VTX could not be confirmed at 25 mW.") from safe_reset_error
         print(f"\nCompleted matrix: {output_path}")
         return 0
+    except KeyboardInterrupt:
+        print("\nStop requested by operator. Safety reset sequence completed or was attempted.", file=sys.stderr)
+        return 130
     except (MspError, NrpzError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

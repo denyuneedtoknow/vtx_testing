@@ -8,6 +8,7 @@ import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -42,6 +43,11 @@ class VtxTesterGui:
         self.root.title("VTX Tester")
         self.root.minsize(980, 650)
         self.process: subprocess.Popen[str] | None = None
+        self.run_active = False
+        self.stop_requested = False
+        self.close_when_finished = False
+        self.safety_reset_in_progress = False
+        self.safety_reset_confirmed = False
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
         self.vtx = StringVar(value="5.8")
         self.mode = StringVar(value="three")
@@ -55,6 +61,7 @@ class VtxTesterGui:
         self._animation_generation: dict[int, int] = {}
         self.full_progress: dict[str, int] | None = None
         self._build()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(80, self._drain_events)
 
     def _build(self) -> None:
@@ -215,8 +222,12 @@ class VtxTesterGui:
                         break
             self._result_step("Measured", line.removeprefix("VTX output (path-corrected):").strip())
         elif line.startswith("Returning VTX"):
+            self.safety_reset_in_progress = True
+            self.stop_button.configure(state="disabled")
             self._result_step("Safety", line, "warning")
         elif line.startswith("Final VTX:"):
+            self.safety_reset_in_progress = False
+            self.safety_reset_confirmed = True
             self._result_step("Completed", line.removeprefix("Final VTX:").strip(), "ok")
         elif line.startswith("Error:"):
             self.run_failed = True
@@ -312,7 +323,7 @@ class VtxTesterGui:
         frame(1)
 
     def start(self) -> None:
-        if self.process is not None:
+        if self.run_active or self.process is not None:
             return
         if self.mode.get() == "manual":
             self._switch_manual()
@@ -326,6 +337,11 @@ class VtxTesterGui:
         self.result_steps.delete(*self.result_steps.get_children())
         self.results = []
         self.run_failed = False
+        self.run_active = True
+        self.stop_requested = False
+        self.close_when_finished = False
+        self.safety_reset_in_progress = False
+        self.safety_reset_confirmed = False
         self.current_frequency = None
         self._animation_generation.clear()
         self.full_progress = None
@@ -348,10 +364,13 @@ class VtxTesterGui:
             # process by default. The terminal reference chart contains Unicode
             # blocks, so force UTF-8 before the child starts printing.
             environment["PYTHONIOENCODING"] = "utf-8"
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             self.process = subprocess.Popen(
                 command, cwd=ROOT, text=True, encoding="utf-8", errors="replace", env=environment,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1, creationflags=creation_flags,
             )
+            if self.stop_requested:
+                self._interrupt_process(self.process)
             assert self.process.stdout is not None
             for line in self.process.stdout:
                 self.events.put(("log", line.rstrip()))
@@ -421,17 +440,56 @@ class VtxTesterGui:
                 except NrpzError:
                     pass
 
+    @staticmethod
+    def _interrupt_process(process: subprocess.Popen[str]) -> None:
+        """Interrupt the child without bypassing its VTX safety-reset finally block."""
+        if process.poll() is not None:
+            return
+        interrupt = signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGINT
+        process.send_signal(interrupt)
+
+    def _request_soft_stop(self) -> None:
+        if self.stop_requested:
+            return
+        self.stop_requested = True
+        self.stop_button.configure(state="disabled")
+        if self.safety_reset_in_progress:
+            self.result_status.set("VTX is already returning to 25 mW. Waiting for confirmation…")
+            self._line("Close/stop requested while the VTX safety reset was already running.")
+            return
+        self.result_status.set("Stopping test safely and returning VTX to 25 mW…")
+        self._result_step("Stopping", "Waiting for the VTX safety reset to complete.", "warning")
+        self._line("Soft stop requested. Waiting for the child test to return VTX to 25 mW.")
+        process = self.process
+        if process is not None:
+            try:
+                self._interrupt_process(process)
+            except OSError as exc:
+                self.events.put(("stop_error", str(exc)))
+
     def stop(self) -> None:
-        if self.process is not None:
-            if not messagebox.askyesno(
-                "Stop measurement",
-                "Stopping immediately can prevent the script from returning the VTX to 25 mW. "
-                "Use manual switch afterwards to set 25 mW. Continue?",
-                parent=self.root,
-            ):
-                return
-            self.process.terminate()
-            self._line("Stop requested. Set the VTX to 25 mW manually after the process exits.")
+        if not self.run_active:
+            return
+        if not messagebox.askyesno(
+            "Stop measurement",
+            "Stop the test and wait while the VTX is returned to 25 mW?",
+            parent=self.root,
+        ):
+            return
+        self._request_soft_stop()
+
+    def _on_close(self) -> None:
+        if not self.run_active:
+            self.root.destroy()
+            return
+        if not messagebox.askyesno(
+            "Close VTX Tester",
+            "A test is running. Stop it safely, return the VTX to 25 mW, and then close?",
+            parent=self.root,
+        ):
+            return
+        self.close_when_finished = True
+        self._request_soft_stop()
 
     def _drain_events(self) -> None:
         try:
@@ -443,9 +501,18 @@ class VtxTesterGui:
                 elif kind == "finished":
                     self._line(f"Process finished with exit code {value}.")
                     self.process = None
+                    self.run_active = False
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
-                    if value != "0":
+                    if self.stop_requested:
+                        self.run_failed = True
+                        if self.safety_reset_confirmed:
+                            self.result_status.set("Test stopped safely. VTX was confirmed at 25 mW.")
+                            self._result_step("Stopped", "VTX was returned to 25 mW.", "ok")
+                        else:
+                            self.result_status.set("Test stopped, but 25 mW was not confirmed. Check the VTX and technical log.")
+                            self._result_step("Safety warning", "VTX at 25 mW was not confirmed.", "error")
+                    elif value != "0":
                         self.run_failed = True
                         self.result_status.set("Test stopped with an error. Partial results, if any, are shown below.")
                         self._result_step("Error", f"Process finished with exit code {value}.", "error")
@@ -453,6 +520,8 @@ class VtxTesterGui:
                         self.result_status.set("Test completed. Compare the values and colors with the reference below.")
                     if self.output_path and self.output_path.exists():
                         self.load_result(self.output_path)
+                    if self.close_when_finished:
+                        self.root.destroy()
                 elif kind == "manual":
                     self._line(value)
                     self.result_status.set("Frequency and power were set. Measuring output now.")
@@ -474,12 +543,20 @@ class VtxTesterGui:
                 elif kind == "error":
                     self._line("Error: " + value)
                     self.process = None
+                    self.run_active = False
                     self.run_failed = True
                     self.result_status.set("Action failed. See the error below and the technical log.")
                     self._result_step("Error", value, "error")
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
                     messagebox.showerror("VTX Tester", value, parent=self.root)
+                    if self.close_when_finished:
+                        self.root.destroy()
+                elif kind == "stop_error":
+                    self._line("Could not request soft stop: " + value)
+                    self.result_status.set("Could not request a safe stop. The test is still running.")
+                    self._result_step("Stop error", value, "error")
+                    messagebox.showerror("VTX Tester", f"Could not request a safe stop: {value}", parent=self.root)
         except queue.Empty:
             pass
         self.root.after(80, self._drain_events)

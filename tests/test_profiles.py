@@ -20,7 +20,6 @@ class VtxProfileTests(unittest.TestCase):
 
     def test_7_2_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_7_2_5w.json", "ft_vtx_7_2_5w_reference.json")
-        self.assert_reference_matches_profile("ft_vtx_7_2_5w.json", "ft_vtx_7_2_5w_reference_new.json")
 
     def test_3_3_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_3_3_4w.json", "ft_vtx_3_3_4w_reference.json")
@@ -45,13 +44,21 @@ class VtxProfileTests(unittest.TestCase):
             plan = load_plan(ROOT / "configs/test_plans" / name)
             self.assertEqual(len(plan["points"]), 3)
 
+    def test_three_point_references_have_one_source(self):
+        for path in sorted((ROOT / "configs/test_plans").glob("*three_point*.json")):
+            raw_plan = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("reference_measurements", raw_plan)
+            self.assertTrue(all("reference_output_mw" not in point for point in raw_plan["points"]))
+            loaded_plan = load_plan(path)
+            self.assertTrue(all(point["reference_output_mw"] > 0 for point in loaded_plan["points"]))
+
     def test_5_8_plan_uses_betaflight_supported_bands(self):
         plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_three_point_4w.json")
         self.assertEqual(
             [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
             [("X", 1, 4990), ("E", 8, 5945), ("H", 8, 7210)],
         )
-        self.assertEqual(plan["points"][1]["reference_output_mw"], 2400)
+        self.assertEqual(plan["points"][1]["reference_output_mw"], 2150)
         self.assertEqual(set(plan["_profile"]["bands"]), {"X", "D", "L", "E", "A", "B", "F", "H"})
         self.assertEqual(plan["test_power"], {"index": 4, "nominal_mw": 4000})
 
@@ -61,7 +68,7 @@ class VtxProfileTests(unittest.TestCase):
         )
         self.assertEqual(reference["nominal_power_mw"], 4000)
         self.assertEqual(reference["bands"]["X"][0], 5020)
-        self.assertEqual(reference["bands"]["E"][7], 3740)
+        self.assertEqual(reference["bands"]["E"][7], 2150)
         self.assertEqual(reference["bands"]["H"][7], 4070)
 
     def test_new_plans_use_the_supported_1_2_and_2_7_points(self):

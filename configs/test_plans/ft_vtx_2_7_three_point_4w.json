@@ -18,20 +18,17 @@
     {
       "band": "A",
       "channel": 1,
-      "frequency_mhz": 2700,
-      "reference_output_mw": 3400
+      "frequency_mhz": 2700
     },
     {
       "band": "B",
       "channel": 1,
-      "frequency_mhz": 2860,
-      "reference_output_mw": 3880
+      "frequency_mhz": 2860
     },
     {
       "band": "B",
       "channel": 8,
-      "frequency_mhz": 3000,
-      "reference_output_mw": 3410
+      "frequency_mhz": 3000
     }
   ]
 }

@@ -1,6 +1,7 @@
 import unittest
 from io import StringIO
 import csv
+import signal
 
 from vtx_a1_measure import build_set_vtx_config_payload
 from vtx_three_point_test import (
@@ -8,6 +9,7 @@ from vtx_three_point_test import (
     ANSI_RED,
     ANSI_YELLOW,
     format_power,
+    install_soft_interrupt_handler,
     measure_and_report_point,
     observe_power,
     power_color,
@@ -22,6 +24,20 @@ from unittest.mock import patch
 
 
 class VtxMeasurementTests(unittest.TestCase):
+    def test_soft_interrupt_handler_is_a_noop_outside_windows(self):
+        with patch("vtx_three_point_test.sys.platform", "linux"), patch("vtx_three_point_test.signal.signal") as register:
+            install_soft_interrupt_handler()
+        register.assert_not_called()
+
+    def test_soft_interrupt_handler_maps_windows_break_to_keyboard_interrupt(self):
+        with (
+            patch("vtx_three_point_test.sys.platform", "win32"),
+            patch.object(signal, "SIGBREAK", 21, create=True),
+            patch("vtx_three_point_test.signal.signal") as register,
+        ):
+            install_soft_interrupt_handler()
+        register.assert_called_once_with(21, signal.default_int_handler)
+
     def test_observe_power_uses_exact_requested_sample_count(self):
         class Sensor:
             def __init__(self):

@@ -3,7 +3,7 @@
   "power_index": 4,
   "nominal_power_mw": 4000,
   "unit": "mW",
-  "description": "Reference values transcribed from the 5.8 GHz frequency-sweep screenshots supplied on 2026-07-17. Values are keyed by VTX band and channel; not pass/fail limits.",
+  "description": "Archived reference values transcribed from the 5.8 GHz frequency-sweep screenshots supplied on 2026-07-17. Values are keyed by VTX band and channel; not pass/fail limits.",
   "bands": {
     "A": [2600, 2720, 2820, 2910, 3040, 3170, 3270, 3390],
     "B": [3330, 3230, 3120, 3020, 2910, 2810, 2700, 2560],

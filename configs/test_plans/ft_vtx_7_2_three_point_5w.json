@@ -22,20 +22,17 @@
     {
       "band": "A",
       "channel": 1,
-      "frequency_mhz": 6110,
-      "reference_output_mw": 6870
+      "frequency_mhz": 6110
     },
     {
       "band": "F",
       "channel": 7,
-      "frequency_mhz": 6710,
-      "reference_output_mw": 9320
+      "frequency_mhz": 6710
     },
     {
       "band": "H",
       "channel": 8,
-      "frequency_mhz": 7210,
-      "reference_output_mw": 6290
+      "frequency_mhz": 7210
     }
   ]
 }

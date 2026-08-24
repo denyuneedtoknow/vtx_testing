@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -51,6 +52,12 @@ REFERENCE_GRAPH_WIDTH = 28
 REFERENCE_GRAPH_MAX_PERCENT = 125.0
 
 
+def install_soft_interrupt_handler() -> None:
+    """Make a Windows CTRL+BREAK from the GUI unwind through cleanup blocks."""
+    if sys.platform == "win32" and hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+
+
 def plan_for_vtx(vtx: str) -> Path:
     return PLAN_DIRECTORY / VTX_PLAN_FILENAMES[vtx]
 
@@ -85,10 +92,13 @@ def load_plan(plan_path: Path) -> dict[str, Any]:
         test_power = plan["test_power"]
         safe_power = plan["safe_power_after_test"]
         profile_path = Path(plan["vtx_profile"])
+        reference_path = Path(plan["reference_measurements"])
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise ValueError(f"Cannot read test plan {plan_path}: {exc}") from exc
     if not isinstance(points, list) or not points:
         raise ValueError("Test plan must contain at least one point.")
+    if not isinstance(test_power, dict) or not isinstance(safe_power, dict):
+        raise ValueError("Test plan power settings must be objects.")
     if not isinstance(test_power.get("index"), int) or not isinstance(safe_power.get("index"), int):
         raise ValueError("Test plan power indices must be integers.")
     thresholds = plan.get("reference_thresholds_percent", DEFAULT_REFERENCE_THRESHOLDS_PERCENT)
@@ -102,6 +112,16 @@ def load_plan(plan_path: Path) -> dict[str, Any]:
     if not 0 <= yellow_min <= green_min <= 100:
         raise ValueError("reference thresholds must satisfy 0 <= yellow_min <= green_min <= 100.")
     profile = load_profile(profile_path if profile_path.is_absolute() else plan_path.parent / profile_path)
+    resolved_reference_path = reference_path if reference_path.is_absolute() else plan_path.parent / reference_path
+    try:
+        reference = json.loads(resolved_reference_path.read_text(encoding="utf-8"))
+        reference_bands = reference["bands"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"Cannot read reference measurements {resolved_reference_path}: {exc}") from exc
+    if not isinstance(reference_bands, dict):
+        raise ValueError(f"Reference measurements {resolved_reference_path} have invalid bands.")
+    if reference.get("power_index") != test_power["index"] or reference.get("nominal_power_mw") != test_power.get("nominal_mw"):
+        raise ValueError("Reference measurement power does not match the test plan power.")
     for point in points:
         band = point.get("band")
         channel = point.get("channel")
@@ -112,6 +132,13 @@ def load_plan(plan_path: Path) -> dict[str, Any]:
             raise ValueError(f"Test point does not exist in VTX profile: {point!r}")
         if profile["bands"][band][channel - 1] != frequency_mhz:
             raise ValueError(f"Test point frequency does not match VTX profile: {point!r}")
+        try:
+            reference_output_mw = reference_bands[band][channel - 1]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(f"Reference measurement does not contain test point {band}{channel}.") from exc
+        if not isinstance(reference_output_mw, (int, float)) or reference_output_mw <= 0:
+            raise ValueError(f"Reference measurement for {band}{channel} must be positive.")
+        point["reference_output_mw"] = reference_output_mw
     plan["_profile"] = profile
     plan["_reference_thresholds_percent"] = {"green_min": green_min, "yellow_min": yellow_min}
     return plan
@@ -478,6 +505,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    install_soft_interrupt_handler()
     # A GUI receives this program through a pipe. Line buffering keeps every
     # switching and sample event visible while the test is still in progress.
     try:
@@ -656,6 +684,9 @@ def main() -> int:
             if sensor_close_error:
                 raise sensor_close_error
         return 0
+    except KeyboardInterrupt:
+        print("\nStop requested by operator. Safety reset sequence completed or was attempted.", file=sys.stderr)
+        return 130
     except (MspError, NrpzError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
