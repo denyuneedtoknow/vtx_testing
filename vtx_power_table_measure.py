@@ -18,7 +18,7 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from measurement_path import load_measurement_path, offset_db_at_frequency
+from measurement_path import load_measurement_path, offset_db_at_frequency, validate_sensor_frequencies
 from vtx_a1_measure import format_vtx
 from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, read_vtx_power_levels, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
@@ -47,6 +47,7 @@ DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES = {
     "1.2.all": "ft_vtx_1_2_direct_sweep_4w.json",
     "2.7.all": "ft_vtx_2_7_direct_sweep_4w.json",
     "5.8.all": "vtx_4_9_7_2_direct_sweep_4w.json",
+    "8.5": "ft_vtx_8_5_direct_sweep_5w.json",
     "4.9-7.2": "vtx_4_9_7_2_direct_sweep_4w.json",  # Backward-compatible alias.
 }
 
@@ -141,6 +142,49 @@ def measurement_power_levels(profile: dict[str, Any]) -> list[tuple[int, int]]:
     return powers
 
 
+def selected_power_levels(profile: dict[str, Any], selection: str) -> list[tuple[int, int]]:
+    """Return the requested working power level(s), without the PIT/off level."""
+    powers = measurement_power_levels(profile)
+    if selection == "all":
+        return powers
+    requested_mw = int(selection)
+    selected = [(index, power_mw) for index, power_mw in powers if power_mw == requested_mw]
+    if not selected:
+        raise ValueError(f"The selected VTX profile does not provide {requested_mw} mW.")
+    return selected
+
+
+def observe_power_trend(
+    sensor: NrpzSensor,
+    *,
+    timeout_ms: int,
+    sample_interval_s: float,
+    samples: int,
+    threshold_percent: float,
+) -> dict[str, float | int | str]:
+    """Observe output drift after settling; this is informational, not a failure gate."""
+    if samples < 2 or sample_interval_s < 0 or threshold_percent <= 0:
+        raise ValueError("Invalid trend observation settings.")
+    started = time.monotonic()
+    readings: list[float] = []
+    for sample_index in range(samples):
+        readings.append(watts_to_millwatts(sensor.read_watts(timeout_ms)))
+        if sample_index + 1 < samples and sample_interval_s:
+            time.sleep(sample_interval_s)
+    first_mw, last_mw = readings[0], readings[-1]
+    mean_mw = fmean(readings)
+    change_percent = (last_mw - first_mw) / mean_mw * 100 if mean_mw else 0.0
+    trend = "rising" if change_percent > threshold_percent else "falling" if change_percent < -threshold_percent else "stable"
+    return {
+        "first_mw": first_mw,
+        "last_mw": last_mw,
+        "change_percent": change_percent,
+        "elapsed_s": time.monotonic() - started,
+        "samples": len(readings),
+        "trend": trend,
+    }
+
+
 def write_matrix(path: Path, points: list[dict[str, int | str]], powers: list[tuple[int, int]], values: dict[tuple[int, str], float]) -> None:
     """Write the current result matrix, keeping incomplete cells empty."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,11 +215,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--settle-time", type=float, help="Seconds to wait after each VTX switch (defaults to the selected plan).")
+    parser.add_argument("--path-adjustment", choices=("add", "subtract"), default="add", help="Whether to add or subtract the frequency-dependent path adjustment (default: add).")
+    parser.add_argument("--power", choices=("all", "25", "2000", "2500", "4000", "5000"), default="all", help="Nominal output power to measure, or all available levels (default: all).")
     parser.add_argument("--samples", type=int, default=3, help="Independent sensor readings to average per cell (default: 3).")
     parser.add_argument("--warmup-readings", type=int, default=1, help="Sensor readings to discard after each switch, before averaging (default: 1).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a cell is measured (default: 3).")
     parser.add_argument("--stability-tolerance-percent", type=float, default=2.0, help="Maximum peak-to-peak spread for stable readings (default: 2).")
     parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
+    parser.add_argument("--trend-samples", type=int, default=10, help="Readings used to observe post-settle output trend (default: 10).")
+    parser.add_argument("--trend-threshold-percent", type=float, default=2.0, help="Absolute first-to-last change classified as rising/falling (default: 2).")
     parser.add_argument("--sample-interval", type=float, default=0.5, help="Seconds between readings in a cell (default: 0.5).")
     parser.add_argument("--averages", type=int, default=16, help="NRP-Z11 averages within each reading (default: 16).")
     parser.add_argument("--timeout-ms", type=int, default=5000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
@@ -185,7 +233,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if (args.baud <= 0 or args.timeout <= 0 or args.samples <= 0 or args.warmup_readings < 0 or args.sample_interval < 0
             or args.averages <= 0 or args.timeout_ms <= 0 or args.stability_samples < 2
-            or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0):
+            or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0 or args.trend_samples < 2
+            or args.trend_threshold_percent <= 0):
         parser.error("baud, timeout, samples, averages, timeout-ms, stability-tolerance-percent and stability-timeout-s must be positive; stability-samples must be at least 2; warmup-readings and sample-interval cannot be negative.")
     if args.settle_time is not None and args.settle_time < 0:
         parser.error("settle-time cannot be negative.")
@@ -207,7 +256,8 @@ def main() -> int:
             raise ValueError("Test plan is missing measurement_path_profile.")
         measurement_path = load_measurement_path(plan_path.parent / measurement_path_value)
         points = measurement_points(profile)
-        powers = measurement_power_levels(profile)
+        validate_sensor_frequencies(measurement_path, [int(point["frequency_mhz"]) for point in points])
+        powers = selected_power_levels(profile, args.power)
         settle_time_s = float(plan["settle_time_s"]) if args.settle_time is None else args.settle_time
         output_path = args.csv or Path("logs") / f"vtx-power-table-{args.vtx}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.csv"
         values: dict[tuple[int, str], float] = {}
@@ -216,6 +266,8 @@ def main() -> int:
         print(f"Plan: {'direct-frequency sweep of' if direct_frequency else 'full'} {profile['model']} power table")
         print(f"{len(points)} channels × {len(powers)} power levels × {args.samples} averaged readings")
         print(f"Discarded warmup readings per cell: {args.warmup_readings}")
+        print(f"Path correction: {args.path_adjustment} frequency adjustment to the fixed attenuator.")
+        print(f"Trend observation: {args.trend_samples} readings, {args.sample_interval:g} s apart; rising/falling threshold: {args.trend_threshold_percent:g}%.")
         print(f"Result matrix: {output_path}")
         print("The VTX will be returned to 25 mW at the end.")
 
@@ -251,7 +303,9 @@ def main() -> int:
                             direct_frequency=direct_frequency,
                         )
                         sensor.configure(int(point["frequency_mhz"]) * 1_000_000, args.averages)
-                        level_offset_db = offset_db_at_frequency(measurement_path, int(point["frequency_mhz"]))
+                        level_offset_db = offset_db_at_frequency(
+                            measurement_path, int(point["frequency_mhz"]), path_adjustment=args.path_adjustment
+                        )
                         sensor.set_level_offset(level_offset_db)
                         for _ in range(args.warmup_readings):
                             sensor.read_watts(args.timeout_ms)
@@ -262,6 +316,17 @@ def main() -> int:
                             required_samples=args.stability_samples,
                             tolerance_percent=args.stability_tolerance_percent, max_wait_s=args.stability_timeout_s,
                         )
+                        print(f"  VTX output stable: {fmean(stable_readings):.0f} mW over {len(stable_readings)} readings.")
+                        trend = observe_power_trend(
+                            sensor, timeout_ms=args.timeout_ms, sample_interval_s=args.sample_interval,
+                            samples=args.trend_samples, threshold_percent=args.trend_threshold_percent,
+                        )
+                        print(
+                            f"  Output trend: {label} / {power_mw} mW: "
+                            f"{trend['first_mw']:.0f} → {trend['last_mw']:.0f} mW, "
+                            f"{trend['change_percent']:+.1f}% over {trend['elapsed_s']:.1f} s, "
+                            f"{trend['trend']}"
+                        )
                         readings: list[float] = []
                         for sample_index in range(args.samples):
                             readings.append(watts_to_millwatts(sensor.read_watts(args.timeout_ms)))
@@ -270,7 +335,7 @@ def main() -> int:
                         average_mw = fmean(readings)
                         values[(power_index, str(point["band"]) + str(point["channel"]))] = average_mw
                         write_matrix(output_path, points, powers, values)
-                        print(f"  {label:<18} {average_mw:.0f} mW  ({len(readings)} readings; stable at {fmean(stable_readings):.0f} mW)")
+                        print(f"  {label:<18} {average_mw:.0f} mW  ({len(readings)} readings; trend {trend['trend']})")
             finally:
                 if sensor is not None:
                     try:

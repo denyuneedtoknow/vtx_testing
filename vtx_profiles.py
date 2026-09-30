@@ -20,8 +20,8 @@ def load_profile(path: Path) -> dict[str, Any]:
     bands = profile.get("bands")
     if not isinstance(bands, dict) or not bands:
         raise ValueError(f"VTX profile {path} has no valid bands.")
-    if len(bands) > 8:
-        raise ValueError(f"VTX profile {path} has {len(bands)} bands; Betaflight supports at most 8.")
+    if len(bands) > 255:
+        raise ValueError(f"VTX profile {path} has too many bands.")
     return profile
 
 

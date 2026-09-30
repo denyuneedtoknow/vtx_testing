@@ -10,6 +10,7 @@ from vtx_three_point_test import (
     ANSI_YELLOW,
     format_power,
     install_soft_interrupt_handler,
+    milliwatts_to_dbm,
     measure_and_report_point,
     observe_power,
     power_color,
@@ -114,6 +115,9 @@ class VtxMeasurementTests(unittest.TestCase):
         self.assertEqual(summary["average_mw"], 6900.0)
         self.assertEqual(summary["minimum_mw"], 6800.0)
         self.assertEqual(summary["change_mw"], -200.0)
+
+    def test_converts_milliwatts_to_dbm(self):
+        self.assertAlmostEqual(milliwatts_to_dbm(5000), 36.9897, places=4)
 
     def test_waits_for_consecutive_stable_readings(self):
         class Sensor:

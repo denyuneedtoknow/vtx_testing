@@ -40,6 +40,7 @@ class VtxProfileTests(unittest.TestCase):
             "ft_vtx_3_3_three_point_4w.json",
             "ft_vtx_5_8_three_point_4w.json",
             "ft_vtx_7_2_three_point_5w.json",
+            "ft_vtx_8_5_three_point_5w.json",
         ):
             plan = load_plan(ROOT / "configs/test_plans" / name)
             self.assertEqual(len(plan["points"]), 3)
@@ -81,13 +82,13 @@ class VtxProfileTests(unittest.TestCase):
             actual = [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]]
             self.assertEqual(actual, expected)
 
-    def test_all_vtx_profiles_have_at_most_eight_betaflight_bands(self):
+    def test_profiles_have_valid_band_counts(self):
         for profile_path in (ROOT / "configs/vtx_profiles").glob("*.json"):
             with self.subTest(profile=profile_path.name):
-                self.assertLessEqual(len(load_profile(profile_path)["bands"]), 8)
+                self.assertLessEqual(len(load_profile(profile_path)["bands"]), 255)
 
     def test_each_short_vtx_option_resolves_to_a_plan(self):
-        for vtx in ("1.2", "2.7", "3.3", "5.8", "7.2"):
+        for vtx in ("1.2", "2.7", "3.3", "5.8", "7.2", "8.5"):
             self.assertTrue(plan_for_vtx(vtx).is_file())
 
     def test_new_full_table_plans_match_their_betaflight_tables(self):
