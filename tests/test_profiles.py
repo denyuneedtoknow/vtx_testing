@@ -33,12 +33,18 @@ class VtxProfileTests(unittest.TestCase):
     def test_5_8_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_5_8_4w.json", "ft_vtx_5_8_4w_reference.json")
 
+    def test_legacy_5_8_reference_values_match_profile_bands_and_channels(self):
+        self.assert_reference_matches_profile(
+            "ft_vtx_5_8_legacy_4w.json", "ft_vtx_5_8_legacy_4w_reference.json"
+        )
+
     def test_three_point_plans_match_their_vtx_profiles(self):
         for name in (
             "ft_vtx_1_2_three_point_4w.json",
             "ft_vtx_2_7_three_point_4w.json",
             "ft_vtx_3_3_three_point_4w.json",
             "ft_vtx_5_8_three_point_4w.json",
+            "ft_vtx_5_8_legacy_three_point_4w.json",
             "ft_vtx_7_2_three_point_5w.json",
             "ft_vtx_8_5_three_point_5w.json",
         ):
@@ -72,6 +78,18 @@ class VtxProfileTests(unittest.TestCase):
         self.assertEqual(reference["bands"]["E"][7], 2150)
         self.assertEqual(reference["bands"]["H"][7], 4070)
 
+    def test_legacy_5_8_plan_uses_its_original_64_channel_table(self):
+        plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_legacy_three_point_4w.json")
+        self.assertEqual(
+            [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
+            [("X", 1, 4990), ("D", 5, 5510), ("E", 8, 5945)],
+        )
+        self.assertEqual(
+            [point["reference_output_mw"] for point in plan["points"]],
+            [3930, 4550, 2200],
+        )
+        self.assertEqual(set(plan["_profile"]["bands"]), {"A", "B", "E", "F", "R", "D", "X", "L"})
+
     def test_new_plans_use_the_supported_1_2_and_2_7_points(self):
         expected_points = {
             "ft_vtx_1_2_three_point_4w.json": [("A", 1, 1080), ("A", 4, 1200), ("A", 7, 1320)],
@@ -88,7 +106,7 @@ class VtxProfileTests(unittest.TestCase):
                 self.assertLessEqual(len(load_profile(profile_path)["bands"]), 255)
 
     def test_each_short_vtx_option_resolves_to_a_plan(self):
-        for vtx in ("1.2", "2.7", "3.3", "5.8", "7.2", "8.5"):
+        for vtx in ("1.2", "2.7", "3.3", "5.8", "5.8.legacy", "7.2", "8.5"):
             self.assertTrue(plan_for_vtx(vtx).is_file())
 
     def test_new_full_table_plans_match_their_betaflight_tables(self):

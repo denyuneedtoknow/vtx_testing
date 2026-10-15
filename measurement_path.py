@@ -30,12 +30,10 @@ def load_measurement_path(path: Path) -> dict[str, Any]:
     return profile
 
 
-def offset_db_at_frequency(profile: dict[str, Any], frequency_mhz: int, *, path_adjustment: str = "add") -> float:
-    """Return the NRP Level Offset with an additive or subtractive path adjustment."""
+def offset_db_at_frequency(profile: dict[str, Any], frequency_mhz: int) -> float:
+    """Return the NRP Level Offset: fixed attenuator minus path loss."""
     if frequency_mhz <= 0:
         raise ValueError("Frequency must be positive.")
-    if path_adjustment not in {"add", "subtract"}:
-        raise ValueError("path_adjustment must be add or subtract.")
     offsets = profile.get("_offsets")
     if not isinstance(offsets, dict) or not offsets:
         raise ValueError("Measurement-path profile has not been loaded.")
@@ -54,7 +52,7 @@ def offset_db_at_frequency(profile: dict[str, Any], frequency_mhz: int, *, path_
             break
     if path_adjustment_db is None:
         raise ValueError(f"Cannot interpolate a path offset at {frequency_mhz} MHz.")
-    return fixed_attenuator_db + path_adjustment_db if path_adjustment == "add" else fixed_attenuator_db - path_adjustment_db
+    return fixed_attenuator_db - path_adjustment_db
 
 
 def validate_sensor_frequencies(profile: dict[str, Any], frequencies_mhz: list[int]) -> None:

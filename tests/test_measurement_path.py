@@ -22,10 +22,9 @@ class MeasurementPathTests(unittest.TestCase):
                 encoding="utf-8",
             )
             profile = load_measurement_path(path)
-        self.assertEqual(offset_db_at_frequency(profile, 500), 31.0)
+        self.assertEqual(offset_db_at_frequency(profile, 500), 29.0)
         self.assertEqual(offset_db_at_frequency(profile, 2500), 30.0)
-        self.assertEqual(offset_db_at_frequency(profile, 1500), 30.5)
-        self.assertEqual(offset_db_at_frequency(profile, 1500, path_adjustment="subtract"), 29.5)
+        self.assertEqual(offset_db_at_frequency(profile, 1500), 29.5)
 
     def test_rejects_frequency_above_sensor_limit_before_measurement(self):
         profile = {"sensor_max_frequency_mhz": 8000}

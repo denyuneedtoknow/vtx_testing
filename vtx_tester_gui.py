@@ -17,7 +17,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean
-from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, W, X, Canvas, StringVar, Tk
+from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, W, X, BooleanVar, Canvas, StringVar, Tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
@@ -55,7 +55,7 @@ class VtxTesterGui:
         self.samples = StringVar(value="3")
         self.full_power = StringVar(value="All")
         self.full_settle_time = StringVar(value="3")
-        self.path_adjustment = StringVar(value="Add path loss")
+        self.sound_enabled = BooleanVar(value=True)
         self.frequency = StringVar(value="5945")
         self.power = StringVar(value="4000")
         self.output_path: Path | None = None
@@ -80,11 +80,8 @@ class VtxTesterGui:
         ttk.Entry(controls, width=12, textvariable=self.port).grid(row=0, column=3, sticky=W)
         ttk.Label(controls, text="Output readings per point/cell").grid(row=0, column=4, sticky=W, padx=(16, 5))
         ttk.Spinbox(controls, from_=1, to=30, width=5, textvariable=self.samples).grid(row=0, column=5, sticky=W)
-        ttk.Label(controls, text="Path correction").grid(row=0, column=6, sticky=W, padx=(16, 5))
-        ttk.Combobox(
-            controls, state="readonly", width=17, textvariable=self.path_adjustment,
-            values=("Add path loss", "Subtract path loss"),
-        ).grid(row=0, column=7, sticky=W)
+        self.sound_button = ttk.Button(controls, text="🔔", width=3, command=self._toggle_sound)
+        self.sound_button.grid(row=0, column=6, sticky=W, padx=(16, 0))
 
         modes = ttk.Frame(controls)
         modes.grid(row=1, column=0, columnspan=6, sticky=W, pady=(10, 3))
@@ -170,6 +167,24 @@ class VtxTesterGui:
         else:
             self.full_power_box.configure(values=("All", "25 mW", "2 W", "4 W"))
             self.manual_power_box.configure(values=("25", "2000", "4000"))
+
+    def _toggle_sound(self) -> None:
+        self.sound_enabled.set(not self.sound_enabled.get())
+        self.sound_button.configure(text="🔔" if self.sound_enabled.get() else "🔕")
+
+    def _play_completion_sound(self) -> None:
+        """Play the operating system's standard completion sound when enabled."""
+        if not self.sound_enabled.get():
+            return
+        try:
+            if sys.platform == "win32":
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            else:
+                self.root.bell()
+        except Exception:
+            # A sound failure must never affect an already completed VTX test.
+            pass
 
     def _sync_manual_frequencies(self) -> None:
         """Populate manual selection with real configured channels for this VTX."""
@@ -284,8 +299,6 @@ class VtxTesterGui:
             command = [*self._tool_command("VTX-Power-Table", "vtx_power_table_measure.py"), "--vtx", full_test_vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
             power_selection = {"All": "all", "25 mW": "25", "2 W": "2000", "2.5 W": "2500", "4 W": "4000", "5 W": "5000"}[self.full_power.get()]
             command.extend(["--power", power_selection, "--settle-time", self.full_settle_time.get()])
-        path_adjustment = {"Add path loss": "add", "Subtract path loss": "subtract"}[self.path_adjustment.get()]
-        command.extend(["--path-adjustment", path_adjustment])
         if self.port.get().strip():
             command.extend(["--port", self.port.get().strip()])
         return command
@@ -436,10 +449,9 @@ class VtxTesterGui:
         self._draw_result_chart()
         self.start_button.configure(state="disabled")
         self._line(f"Switching directly to {frequency} MHz / {power} mW…")
-        path_adjustment = {"Add path loss": "add", "Subtract path loss": "subtract"}[self.path_adjustment.get()]
-        threading.Thread(target=self._manual_worker, args=(frequency, power, int(self.samples.get()), path_adjustment), daemon=True).start()
+        threading.Thread(target=self._manual_worker, args=(frequency, power, int(self.samples.get())), daemon=True).start()
 
-    def _manual_worker(self, frequency: int, power: int, sample_count: int, path_adjustment: str) -> None:
+    def _manual_worker(self, frequency: int, power: int, sample_count: int) -> None:
         sensor: NrpzSensor | None = None
         try:
             port = resolve_port(self.port.get().strip() or None, 115200, 2.0)
@@ -457,7 +469,7 @@ class VtxTesterGui:
             sensor = NrpzSensor()
             sensor.open("*")
             sensor.configure(frequency * 1_000_000, 16)
-            sensor.set_level_offset(offset_db_at_frequency(measurement_path, frequency, path_adjustment=path_adjustment))
+            sensor.set_level_offset(offset_db_at_frequency(measurement_path, frequency))
             wait_for_stable_power(sensor, timeout_ms=5_000, sample_interval_s=.5, required_samples=3, tolerance_percent=2.0, max_wait_s=15.0)
             readings: list[float] = []
             for index in range(1, sample_count + 1):
@@ -556,6 +568,7 @@ class VtxTesterGui:
                         self._result_step("Error", f"Process finished with exit code {value}.", "error")
                     else:
                         self.result_status.set("Test completed. Compare the values and colors with the reference below.")
+                        self._play_completion_sound()
                     if self.output_path and self.output_path.exists():
                         self.load_result(self.output_path)
                     if self.close_when_finished:
@@ -578,6 +591,7 @@ class VtxTesterGui:
                         self._result_step("Average", f"{float(value):.0f} mW", "ok")
                     self.result_status.set("Manual measurement completed. The VTX remains at the selected frequency and power.")
                     self.start_button.configure(state="normal")
+                    self._play_completion_sound()
                 elif kind == "error":
                     self._line("Error: " + value)
                     self.process = None

@@ -1,0 +1,17 @@
+{
+  "name": "FT VTX 5.8 GHz legacy: three-point 4 W test",
+  "vtx_profile": "../vtx_profiles/ft_vtx_5_8_legacy_4w.json",
+  "reference_measurements": "../reference_measurements/ft_vtx_5_8_legacy_4w_reference.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "test_power": { "index": 4, "nominal_mw": 4000 },
+  "safe_power_after_test": { "index": 2, "nominal_mw": 25 },
+  "reference_thresholds_percent": { "green_min": 90, "yellow_min": 80 },
+  "settle_time_s": 3.0,
+  "observation_time_s": 3.0,
+  "sample_interval_s": 0.5,
+  "points": [
+    { "band": "X", "channel": 1, "frequency_mhz": 4990 },
+    { "band": "D", "channel": 5, "frequency_mhz": 5510 },
+    { "band": "E", "channel": 8, "frequency_mhz": 5945 }
+  ]
+}

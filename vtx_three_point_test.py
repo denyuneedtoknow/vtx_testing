@@ -42,6 +42,7 @@ VTX_PLAN_FILENAMES = {
     "2.7": "ft_vtx_2_7_three_point_4w.json",
     "3.3": "ft_vtx_3_3_three_point_4w.json",
     "5.8": "ft_vtx_5_8_three_point_4w.json",
+    "5.8.legacy": "ft_vtx_5_8_legacy_three_point_4w.json",
     "7.2": "ft_vtx_7_2_three_point_5w.json",
     "8.5": "ft_vtx_8_5_three_point_5w.json",
 }
@@ -494,11 +495,10 @@ def parse_args() -> argparse.Namespace:
         help="Flight Controller COM port, for example COM83. Omit to auto-detect the first MSP-capable FC.",
     )
     plan_source = parser.add_mutually_exclusive_group()
-    plan_source.add_argument("--vtx", choices=sorted(VTX_PLAN_FILENAMES), help="VTX band to test: 1.2, 2.7, 3.3, 5.8 or 7.2 GHz.")
+    plan_source.add_argument("--vtx", choices=sorted(VTX_PLAN_FILENAMES), help="VTX profile to test, for example 5.8 or 5.8.legacy.")
     plan_source.add_argument("--plan", type=Path, help="Three-point test plan JSON. Omit to select interactively.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
-    parser.add_argument("--path-adjustment", choices=("add", "subtract"), default="add", help="Whether to add or subtract the frequency-dependent path adjustment (default: add).")
     parser.add_argument("--averages", type=int, default=16, help="NRP-Z11 manual averages (default: 16).")
     parser.add_argument("--samples", type=int, help="Exact readings to collect at each point; overrides the plan observation duration.")
     parser.add_argument("--timeout-ms", type=int, default=5_000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
@@ -556,7 +556,7 @@ def main() -> int:
         direct_frequency = bool(plan.get("direct_frequency", False))
         use_color = not args.no_color and sys.stdout.isatty()
         print(f"Plan: {plan['name']}")
-        print(f"Path correction: {args.path_adjustment} frequency adjustment to the fixed attenuator.")
+        print("Path correction: fixed attenuator minus frequency-dependent path loss.")
         print(f"{test_power['nominal_mw']} mW points: {', '.join(str(point['frequency_mhz']) for point in plan['points'])} MHz")
         if not args.manual:
             print(f"Observation per point: {observation_time_s:g} s, every {sample_interval_s:g} s")
@@ -607,9 +607,7 @@ def main() -> int:
                             direct_frequency=direct_frequency,
                         )
                         print(f"Active VTX: {format_vtx(current)}")
-                        level_offset_db = offset_db_at_frequency(
-                            measurement_path, point["frequency_mhz"], path_adjustment=args.path_adjustment
-                        )
+                        level_offset_db = offset_db_at_frequency(measurement_path, point["frequency_mhz"])
                         sensor.set_level_offset(level_offset_db)
                         stable_readings = wait_for_stable_power(
                             sensor, timeout_ms=args.timeout_ms, sample_interval_s=sample_interval_s,
@@ -649,9 +647,7 @@ def main() -> int:
                             settle_time_s=settle_time_s,
                             direct_frequency=direct_frequency,
                         )
-                        level_offset_db = offset_db_at_frequency(
-                            measurement_path, point["frequency_mhz"], path_adjustment=args.path_adjustment
-                        )
+                        level_offset_db = offset_db_at_frequency(measurement_path, point["frequency_mhz"])
                         sensor.set_level_offset(level_offset_db)
                         stable_readings = wait_for_stable_power(
                             sensor, timeout_ms=args.timeout_ms, sample_interval_s=sample_interval_s,

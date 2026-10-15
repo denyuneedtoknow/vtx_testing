@@ -1,6 +1,6 @@
 {
   "name": "control",
-  "description": "NRP-Z11 Level Offset: fixed attenuator plus frequency-dependent RF-path loss.",
+  "description": "NRP-Z11 Level Offset: fixed attenuator minus frequency-dependent RF-path loss.",
   "fixed_attenuator_db": 30.0,
   "sensor_max_frequency_mhz": 8000,
   "offset_direction": "set_on_sensor_db",

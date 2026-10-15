@@ -180,13 +180,14 @@ VTX table: порядок і літери бендів, частоти кана�
 python .\vtx_three_point_test.py
 ```
 
-Скрипт запропонує вибрати 1.2 / 2.7 / 3.3 / 5.8 / 7.2. Точки задаються у test plan для
+Скрипт запропонує вибрати 1.2 / 2.7 / 3.3 / 5.8 / 5.8.legacy / 7.2 / 8.5. Точки задаються у test plan для
 кожної моделі. Поточні точки:
 
 - FT 1.2: 1080, 1200, 1320 MHz;
 - FT 2.7: 2700, 2860, 3000 MHz;
 - FT 3.3: 3170, 3330, 3470 MHz;
 - FT 4.8–7.2: 4990, 5945, 7210 MHz (широкодіапазонна таблиця 4 W);
+- FT 5.8 legacy: 4990, 5510, 5945 MHz (стара 64-канальна таблиця 4 W);
 - FT 7.2: 6110, 6710, 7210 MHz.
 
 Для FT 4.8–7.2 тест використовує вісім бендів, підтримуваних Betaflight:
@@ -212,6 +213,7 @@ python .\vtx_three_point_test.py --vtx 5.8 --manual
 ```powershell
 python .\vtx_three_point_test.py --vtx 7.2
 python .\vtx_three_point_test.py --vtx 5.8
+python .\vtx_three_point_test.py --vtx 5.8.legacy
 python .\vtx_three_point_test.py --vtx 3.3
 python .\vtx_three_point_test.py --vtx 2.7
 python .\vtx_three_point_test.py --vtx 1.2
@@ -227,7 +229,7 @@ python .\vtx_three_point_test.py --vtx 1.2
 python .\vtx_tester_gui.py
 ```
 
-У ньому можна вибрати VTX (1.2 / 2.7 / 3.3 / 5.8 / 7.2 / 8.5) і COM-порт, запустити three-point або повний тест,
+У ньому можна вибрати VTX (1.2 / 2.7 / 3.3 / 5.8 / 5.8.legacy / 7.2 / 8.5) і COM-порт, запустити three-point або повний тест,
 вибрати всі рівні потужності або тільки 25 mW, 2 W чи 4 W, вказати кількість
 незалежних вимірів для однієї комірки повної таблиці й настроїти затримку
 стабілізації після кожного перемикання, а також
@@ -235,6 +237,8 @@ python .\vtx_tester_gui.py
 встановлення частоти через IRC Tramp і не записує VTX table у Betaflight.
 Після three-point тесту вкладка **Results** показує виміряні значення відносно
 референсу: зелений `OK`, жовтий `LOW`, червоний `FAIL`.
+Кнопка `🔔` у верхньому рядку вмикає/вимикає системний звук після успішного
+завершення тесту; `🔕` означає, що звук вимкнений.
 
 Кнопка **Stop** виконує м'яку зупинку: тест перериває поточний цикл, закриває
 паверметр і запускає штатне повернення VTX до 25 mW. GUI показує окреме
@@ -249,6 +253,7 @@ python .\vtx_tester_gui.py
 
 ```powershell
 python .\vtx_power_table_measure.py --vtx 5.8 --samples 3
+python .\vtx_power_table_measure.py --vtx 5.8.legacy --samples 3
 ```
 
 За замовчуванням вимірюються всі доступні робочі рівні. Щоб виміряти лише один,
@@ -285,6 +290,23 @@ JSON та натисніть **Save**. Альтернатива — встави
 [CLI-файл](configs/betaflight_cli/ft_vtx_4_8_7_2_5w_64ch.txt) у вкладці **CLI**.
 Після цього в **Ports** увімкніть `VTX (IRC Tramp)` на UART, TX якого підключений
 до контакту IRC VTX. Таблиця має 64 канали та рівні PIT / 25 mW / 2 W / 4 W.
+
+### Старий FT VTX 5.8 GHz 4 W
+
+Для звичайного, неширокодіапазонного VTX використовуйте окремий профіль
+`5.8.legacy`. Він звіряє стару таблицю з 64 каналів `A/B/E/F/R/D/X/L`, а не
+нову нижньо-верхню таблицю 4.8–7.2 GHz. Завантажте
+[JSON-таблицю](configs/betaflight_vtx_tables/FT5.8_LEGACY_4W_64CH.json) у
+Betaflight Configurator або вставте
+[CLI-команди](configs/betaflight_cli/ft_vtx_5_8_legacy_4w_64ch.txt).
+
+```powershell
+python .\vtx_three_point_test.py --vtx 5.8.legacy
+python .\vtx_power_table_measure.py --vtx 5.8.legacy --samples 3
+```
+
+Для цього профілю три точки — `X1 / 4990 MHz`, `D5 / 5510 MHz` та
+`E8 / 5945 MHz`; їхні референси відповідно `3930`, `4550` і `2200 mW`.
 
 ### Повний заводський sweep FT 4.9–7.2 GHz
 

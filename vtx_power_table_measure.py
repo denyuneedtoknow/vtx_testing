@@ -210,12 +210,11 @@ def write_matrix(path: Path, points: list[dict[str, int | str]], powers: list[tu
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure all VTX channels and power levels into a CSV matrix.")
-    parser.add_argument("--vtx", choices=sorted({*POWER_TABLE_PLAN_FILENAMES, *DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES}), required=True, help="VTX profile: 1.2, 1.2.all, 2.7, 2.7.all, 3.3, 5.8, 5.8.all, 7.2, low, mid or high.")
+    parser.add_argument("--vtx", choices=sorted({*POWER_TABLE_PLAN_FILENAMES, *DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES}), required=True, help="VTX profile, for example 5.8, 5.8.legacy or 5.8.all.")
     parser.add_argument("--port", help="Flight Controller COM port, for example COM35. Omit to auto-detect.")
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--settle-time", type=float, help="Seconds to wait after each VTX switch (defaults to the selected plan).")
-    parser.add_argument("--path-adjustment", choices=("add", "subtract"), default="add", help="Whether to add or subtract the frequency-dependent path adjustment (default: add).")
     parser.add_argument("--power", choices=("all", "25", "2000", "2500", "4000", "5000"), default="all", help="Nominal output power to measure, or all available levels (default: all).")
     parser.add_argument("--samples", type=int, default=3, help="Independent sensor readings to average per cell (default: 3).")
     parser.add_argument("--warmup-readings", type=int, default=1, help="Sensor readings to discard after each switch, before averaging (default: 1).")
@@ -266,7 +265,7 @@ def main() -> int:
         print(f"Plan: {'direct-frequency sweep of' if direct_frequency else 'full'} {profile['model']} power table")
         print(f"{len(points)} channels × {len(powers)} power levels × {args.samples} averaged readings")
         print(f"Discarded warmup readings per cell: {args.warmup_readings}")
-        print(f"Path correction: {args.path_adjustment} frequency adjustment to the fixed attenuator.")
+        print("Path correction: fixed attenuator minus frequency-dependent path loss.")
         print(f"Trend observation: {args.trend_samples} readings, {args.sample_interval:g} s apart; rising/falling threshold: {args.trend_threshold_percent:g}%.")
         print(f"Result matrix: {output_path}")
         print("The VTX will be returned to 25 mW at the end.")
@@ -303,9 +302,7 @@ def main() -> int:
                             direct_frequency=direct_frequency,
                         )
                         sensor.configure(int(point["frequency_mhz"]) * 1_000_000, args.averages)
-                        level_offset_db = offset_db_at_frequency(
-                            measurement_path, int(point["frequency_mhz"]), path_adjustment=args.path_adjustment
-                        )
+                        level_offset_db = offset_db_at_frequency(measurement_path, int(point["frequency_mhz"]))
                         sensor.set_level_offset(level_offset_db)
                         for _ in range(args.warmup_readings):
                             sensor.read_watts(args.timeout_ms)
