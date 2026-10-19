@@ -1,0 +1,8 @@
+vtxtable bands 2
+vtxtable channels 8
+vtxtable band 1 BAND_A A CUSTOM 3330 3350 3370 3390 3410 3430 3450 3470
+vtxtable band 2 BAND_B B CUSTOM 3170 3190 3210 3230 3250 3270 3290 3310
+vtxtable powerlevels 4
+vtxtable powervalues 9 25 2000 4000
+vtxtable powerlabels PIT 25 200 400
+save

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from vtx_power_table_measure import (
-    load_direct_frequency_sweep_plan, measurement_points, measurement_power_levels, observe_power_trend,
+    load_direct_frequency_sweep_plan, load_power_table_plan, measurement_points, measurement_power_levels, observe_power_trend,
     selected_power_levels, write_matrix,
 )
 
@@ -71,6 +71,15 @@ class VtxPowerTableMeasureTests(unittest.TestCase):
                 self.assertEqual(len(measurement_points(plan["_profile"])), channels)
                 expected_powers = [(2, 25), (3, 2500), (4, 5000)] if filename == "ft_vtx_8_5_direct_sweep_5w.json" else [(2, 25), (3, 2000), (4, 4000)]
                 self.assertEqual(measurement_power_levels(plan["_profile"]), expected_powers)
+
+    def test_graph58_p5_full_plan_uses_its_own_bands_and_power_levels(self):
+        plan_directory = Path(__file__).resolve().parents[1] / "configs/test_plans"
+        plan = load_power_table_plan(plan_directory / "ft_vtx_graph58_p5_full_table_5w.json")
+        profile = plan["_profile"]
+        self.assertEqual(list(profile["bands"]), ["A", "B", "E", "F", "R", "L", "U", "X"])
+        self.assertEqual(profile["bands"]["U"], [5325, 5348, 5366, 5384, 5402, 5420, 5438, 5456])
+        self.assertEqual(len(measurement_points(profile)), 64)
+        self.assertEqual(measurement_power_levels(profile), [(2, 25), (3, 500), (4, 3000), (5, 5000)])
 
 
 if __name__ == "__main__":

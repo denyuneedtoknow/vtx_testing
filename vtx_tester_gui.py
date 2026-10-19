@@ -35,6 +35,12 @@ from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, load_plan, 
 ROOT = Path(__file__).resolve().parent
 LOG_DIRECTORY = ROOT / "logs"
 STATUS_COLORS = {"OK": "#16803c", "LOW": "#c98300", "FAIL": "#c33131", "MEASURING": "#2563eb", "PENDING": "#98a2b3", "N/A": "#667085"}
+FULL_ONLY_VTX = {"5.8.test"}
+GUI_VTX_OPTIONS = sorted({*VTX_PLAN_FILENAMES, *FULL_ONLY_VTX})
+POWER_SELECTIONS = {
+    "All": "all", "25 mW": "25", "500 mW": "500", "2 W": "2000",
+    "2.5 W": "2500", "3 W": "3000", "4 W": "4000", "5 W": "5000",
+}
 
 
 class VtxTesterGui:
@@ -73,7 +79,7 @@ class VtxTesterGui:
         controls = ttk.LabelFrame(main, text="Test control", padding=10)
         controls.pack(fill=X)
         ttk.Label(controls, text="VTX").grid(row=0, column=0, sticky=W, padx=(0, 5))
-        self.vtx_box = ttk.Combobox(controls, state="readonly", width=13, textvariable=self.vtx, values=sorted(POWER_TABLE_PLAN_FILENAMES))
+        self.vtx_box = ttk.Combobox(controls, state="readonly", width=13, textvariable=self.vtx, values=GUI_VTX_OPTIONS)
         self.vtx_box.grid(row=0, column=1, sticky=W)
         self.vtx_box.bind("<<ComboboxSelected>>", lambda _: self._sync_mode())
         ttk.Label(controls, text="COM port (optional)").grid(row=0, column=2, sticky=W, padx=(16, 5))
@@ -85,8 +91,12 @@ class VtxTesterGui:
 
         modes = ttk.Frame(controls)
         modes.grid(row=1, column=0, columnspan=6, sticky=W, pady=(10, 3))
-        for text, value in (("Three-point test", "three"), ("Full power table", "full"), ("Manual frequency switch", "manual")):
-            ttk.Radiobutton(modes, text=text, variable=self.mode, value=value, command=self._sync_mode).pack(side=LEFT, padx=(0, 16))
+        self.three_mode_button = ttk.Radiobutton(
+            modes, text="Three-point test", variable=self.mode, value="three", command=self._sync_mode
+        )
+        self.three_mode_button.pack(side=LEFT, padx=(0, 16))
+        ttk.Radiobutton(modes, text="Full power table", variable=self.mode, value="full", command=self._sync_mode).pack(side=LEFT, padx=(0, 16))
+        ttk.Radiobutton(modes, text="Manual frequency switch", variable=self.mode, value="manual", command=self._sync_mode).pack(side=LEFT, padx=(0, 16))
 
         self.manual_frame = ttk.Frame(controls)
         ttk.Label(self.manual_frame, text="Frequency, MHz").pack(side=LEFT)
@@ -140,6 +150,9 @@ class VtxTesterGui:
         self._sync_mode()
 
     def _sync_mode(self) -> None:
+        full_only = self.vtx.get() in FULL_ONLY_VTX
+        if full_only and self.mode.get() == "three":
+            self.mode.set("full")
         manual = self.mode.get() == "manual"
         full = self.mode.get() == "full"
         if manual:
@@ -155,14 +168,21 @@ class VtxTesterGui:
             self.full_frame.grid_forget()
         # Keep the operator-facing list limited to physical VTX models.
         # Direct factory sweeps and alternative table profiles remain CLI-only.
-        self.vtx_box.configure(values=sorted(VTX_PLAN_FILENAMES))
-        if self.vtx.get() not in VTX_PLAN_FILENAMES:
+        self.vtx_box.configure(values=GUI_VTX_OPTIONS)
+        if self.vtx.get() not in GUI_VTX_OPTIONS:
             self.vtx.set("5.8")
+        self.three_mode_button.configure(state="disabled" if full_only else "normal")
         if self.vtx.get() == "8.5":
             self.full_power_box.configure(values=("5 W",))
             self.full_power.set("5 W")
             self.manual_power_box.configure(values=("25", "2500", "5000"))
             if self.power.get() not in {"25", "2500", "5000"}:
+                self.power.set("5000")
+        elif self.vtx.get() == "5.8.test":
+            self.full_power_box.configure(values=("All", "25 mW", "500 mW", "3 W", "5 W"))
+            self.full_power.set("All")
+            self.manual_power_box.configure(values=("25", "500", "3000", "5000"))
+            if self.power.get() not in {"25", "500", "3000", "5000"}:
                 self.power.set("5000")
         else:
             self.full_power_box.configure(values=("All", "25 mW", "2 W", "4 W"))
@@ -192,6 +212,8 @@ class VtxTesterGui:
             vtx = self.vtx.get()
             if vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES:
                 plan = load_direct_frequency_sweep_plan(PLAN_DIRECTORY / DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[vtx])
+            elif vtx in POWER_TABLE_PLAN_FILENAMES:
+                plan = load_power_table_plan(PLAN_DIRECTORY / POWER_TABLE_PLAN_FILENAMES[vtx])
             else:
                 plan = load_plan(PLAN_DIRECTORY / VTX_PLAN_FILENAMES[vtx])
             profile = plan["_profile"]
@@ -297,7 +319,7 @@ class VtxTesterGui:
             full_test_vtx = "5.8.all" if vtx == "5.8" else vtx
             self.output_path = LOG_DIRECTORY / f"gui-power-table-{vtx}-{timestamp}.csv"
             command = [*self._tool_command("VTX-Power-Table", "vtx_power_table_measure.py"), "--vtx", full_test_vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
-            power_selection = {"All": "all", "25 mW": "25", "2 W": "2000", "2.5 W": "2500", "4 W": "4000", "5 W": "5000"}[self.full_power.get()]
+            power_selection = POWER_SELECTIONS[self.full_power.get()]
             command.extend(["--power", power_selection, "--settle-time", self.full_settle_time.get()])
         if self.port.get().strip():
             command.extend(["--port", self.port.get().strip()])
@@ -341,7 +363,7 @@ class VtxTesterGui:
             direct = full_test_vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
             plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[full_test_vtx] if direct else POWER_TABLE_PLAN_FILENAMES[full_test_vtx])
             plan = load_direct_frequency_sweep_plan(plan_path) if direct else load_power_table_plan(plan_path)
-            power_selection = {"All": "all", "25 mW": "25", "2 W": "2000", "2.5 W": "2500", "4 W": "4000", "5 W": "5000"}[self.full_power.get()]
+            power_selection = POWER_SELECTIONS[self.full_power.get()]
             selected_powers = [power for power in measurement_power_levels(plan["_profile"]) if power_selection == "all" or power[1] == int(power_selection)]
             cells = len(measurement_points(plan["_profile"])) * len(selected_powers)
             sample_count = int(self.samples.get())
@@ -433,7 +455,7 @@ class VtxTesterGui:
             if not match:
                 raise ValueError("Choose a frequency from the VTX channel list.")
             frequency, power = int(match.group(1)), int(self.power.get())
-            if power not in {25, 2000, 2500, 4000, 5000}:
+            if power not in {25, 500, 2000, 2500, 3000, 4000, 5000}:
                 raise ValueError("Choose a power level offered for the selected VTX.")
             measurement_path = load_measurement_path(ROOT / "configs" / "measurement_path_control.json")
             validate_sensor_frequencies(measurement_path, [frequency])

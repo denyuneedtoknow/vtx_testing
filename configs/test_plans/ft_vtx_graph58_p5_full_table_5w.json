@@ -1,0 +1,6 @@
+{
+  "name": "GRAPH58 P5: full 64-channel power table",
+  "vtx_profile": "../vtx_profiles/ft_vtx_graph58_p5_5w.json",
+  "measurement_path_profile": "../measurement_path_control.json",
+  "settle_time_s": 3.0
+}

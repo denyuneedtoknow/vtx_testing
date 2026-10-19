@@ -275,6 +275,19 @@ python .\vtx_power_table_measure.py --vtx 2.7.all --samples 3
 `1.2.all` проходить усі 9 частот (включно з 1258 MHz), а `2.7.all` — усі 16
 частот від 2700 до 3000 MHz. Обидва режими вимірюють 25 mW, 2 W та 4 W.
 
+### GRAPH58 P5 5.8 GHz 5 W
+
+Для GRAPH58 P5 обирайте профіль `5.8.test` лише в режимі повної таблиці або
+ручного перемикання: референсів для three-point тесту ще немає. Профіль має
+64 канали `A/B/E/F/R/L/U/X` і рівні 25 mW / 500 mW / 3 W / 5 W.
+
+```powershell
+python .\vtx_power_table_measure.py --vtx 5.8.test --samples 3
+```
+
+Перед запуском завантажте у Betaflight
+[JSON-таблицю GRAPH58 P5](configs/betaflight_vtx_tables/GRAPH58_P5_5W_64CH.json).
+
 ### FT VTX 8.5 GHz 5 W
 
 Профіль `8.5` має 80 частот від 7060 до 8500 MHz. Через 10 бендів частоти

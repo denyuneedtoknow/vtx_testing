@@ -42,6 +42,7 @@ POWER_TABLE_PLAN_FILENAMES = {
     "low": "vtx_4_9_7_2_low_full_table_4w.json",
     "mid": "vtx_4_9_7_2_mid_full_table_4w.json",
     "high": "vtx_4_9_7_2_high_full_table_4w.json",
+    "5.8.test": "ft_vtx_graph58_p5_full_table_5w.json",
 }
 DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES = {
     "1.2.all": "ft_vtx_1_2_direct_sweep_4w.json",
@@ -215,7 +216,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baud", type=int, default=115200, help="MSP baud rate (default: 115200).")
     parser.add_argument("--timeout", type=float, default=2.0, help="MSP response timeout in seconds (default: 2).")
     parser.add_argument("--settle-time", type=float, help="Seconds to wait after each VTX switch (defaults to the selected plan).")
-    parser.add_argument("--power", choices=("all", "25", "2000", "2500", "4000", "5000"), default="all", help="Nominal output power to measure, or all available levels (default: all).")
+    parser.add_argument("--power", choices=("all", "25", "500", "2000", "2500", "3000", "4000", "5000"), default="all", help="Nominal output power to measure, or all available levels (default: all).")
     parser.add_argument("--samples", type=int, default=3, help="Independent sensor readings to average per cell (default: 3).")
     parser.add_argument("--warmup-readings", type=int, default=1, help="Sensor readings to discard after each switch, before averaging (default: 1).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a cell is measured (default: 3).")
