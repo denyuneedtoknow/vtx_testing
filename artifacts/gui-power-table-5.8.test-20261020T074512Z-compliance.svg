@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="760" viewBox="0 0 1440 760">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;fill:#172033}.axis{font-size:13px}.title{font-size:23px;font-weight:700}.note{font-size:13px;fill:#526072}.metric{font-size:19px;font-weight:700}.metricnote{font-size:13px;fill:#526072}</style>
+<text x="94" y="36" class="title">VTX 5 W output compliance by frequency</text>
+<text x="94" y="60" class="note">Each dot is one channel; dots are intentionally not connected by a line.</text>
+<circle cx="102" cy="94" r="7" fill="#15803d"/>
+<text x="118" y="91" class="metric">33/64 · ≥ 5 W</text>
+<text x="118" y="112" class="metricnote">reaches selected output</text>
+<circle cx="402" cy="94" r="7" fill="#ca8a04"/>
+<text x="418" y="91" class="metric">6/64 · 4–5 W</text>
+<text x="418" y="112" class="metricnote">below 5 W, but ≥ 4 W</text>
+<circle cx="702" cy="94" r="7" fill="#dc2626"/>
+<text x="718" y="91" class="metric">25/64 · &lt; 4 W</text>
+<text x="718" y="112" class="metricnote">below 80% of selected output</text>
+<rect x="94" y="432.4" width="1310" height="235.6" fill="#fee2e2"/>
+<rect x="94" y="314.7" width="1310" height="117.8" fill="#fef3c7"/>
+<rect x="94" y="138.0" width="1310" height="176.7" fill="#dcfce7"/>
+<line x1="94" y1="668.0" x2="1404" y2="668.0" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="673.0" text-anchor="end" class="axis">2 W</text>
+<line x1="94" y1="609.1" x2="1404" y2="609.1" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="614.1" text-anchor="end" class="axis">2.5 W</text>
+<line x1="94" y1="550.2" x2="1404" y2="550.2" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="555.2" text-anchor="end" class="axis">3 W</text>
+<line x1="94" y1="491.3" x2="1404" y2="491.3" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="496.3" text-anchor="end" class="axis">3.5 W</text>
+<line x1="94" y1="432.4" x2="1404" y2="432.4" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="437.4" text-anchor="end" class="axis">4 W</text>
+<line x1="94" y1="373.6" x2="1404" y2="373.6" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="378.6" text-anchor="end" class="axis">4.5 W</text>
+<line x1="94" y1="314.7" x2="1404" y2="314.7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="319.7" text-anchor="end" class="axis">5 W</text>
+<line x1="94" y1="255.8" x2="1404" y2="255.8" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="260.8" text-anchor="end" class="axis">5.5 W</text>
+<line x1="94" y1="196.9" x2="1404" y2="196.9" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="201.9" text-anchor="end" class="axis">6 W</text>
+<line x1="94" y1="138.0" x2="1404" y2="138.0" stroke="#cbd5e1" stroke-width="1"/>
+<text x="82" y="143.0" text-anchor="end" class="axis">6.5 W</text>
+<line x1="107.7" y1="138" x2="107.7" y2="668" stroke="#e5e7eb" stroke-width="1"/>
+<text x="107.7" y="694" text-anchor="middle" class="axis">5000</text>
+<line x1="382.1" y1="138" x2="382.1" y2="668" stroke="#e5e7eb" stroke-width="1"/>
+<text x="382.1" y="694" text-anchor="middle" class="axis">5200</text>
+<line x1="656.4" y1="138" x2="656.4" y2="668" stroke="#e5e7eb" stroke-width="1"/>
+<text x="656.4" y="694" text-anchor="middle" class="axis">5400</text>
+<line x1="930.8" y1="138" x2="930.8" y2="668" stroke="#e5e7eb" stroke-width="1"/>
+<text x="930.8" y="694" text-anchor="middle" class="axis">5600</text>
+<line x1="1205.1" y1="138" x2="1205.1" y2="668" stroke="#e5e7eb" stroke-width="1"/>
+<text x="1205.1" y="694" text-anchor="middle" class="axis">5800</text>
+<line x1="94" y1="314.7" x2="1404" y2="314.7" stroke="#15803d" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="1404" y="306.7" text-anchor="end" class="note">5 W target</text>
+<line x1="94" y1="432.4" x2="1404" y2="432.4" stroke="#ca8a04" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="1404" y="424.4" text-anchor="end" class="note">4 W / 80%</text>
+<circle cx="94.0" cy="463.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X1 (4990 MHz): 3740 mW</title></circle>
+<circle cx="135.2" cy="484.8" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X2 (5020 MHz): 3556 mW</title></circle>
+<circle cx="176.3" cy="499.4" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X3 (5050 MHz): 3431 mW</title></circle>
+<circle cx="217.5" cy="509.8" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X4 (5080 MHz): 3344 mW</title></circle>
+<circle cx="258.6" cy="519.0" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X5 (5110 MHz): 3265 mW</title></circle>
+<circle cx="299.8" cy="528.5" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X6 (5140 MHz): 3184 mW</title></circle>
+<circle cx="340.9" cy="536.4" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X7 (5170 MHz): 3117 mW</title></circle>
+<circle cx="382.1" cy="544.4" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>X8 (5200 MHz): 3050 mW</title></circle>
+<circle cx="553.5" cy="570.8" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U1 (5325 MHz): 2825 mW</title></circle>
+<circle cx="585.1" cy="574.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U2 (5348 MHz): 2797 mW</title></circle>
+<circle cx="604.3" cy="564.6" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L1 (5362 MHz): 2878 mW</title></circle>
+<circle cx="609.8" cy="577.0" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U3 (5366 MHz): 2773 mW</title></circle>
+<circle cx="634.5" cy="579.6" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U4 (5384 MHz): 2751 mW</title></circle>
+<circle cx="655.0" cy="573.8" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L2 (5399 MHz): 2800 mW</title></circle>
+<circle cx="659.2" cy="581.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U5 (5402 MHz): 2738 mW</title></circle>
+<circle cx="683.8" cy="579.5" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U6 (5420 MHz): 2751 mW</title></circle>
+<circle cx="705.8" cy="572.2" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L3 (5436 MHz): 2813 mW</title></circle>
+<circle cx="708.5" cy="572.9" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U7 (5438 MHz): 2808 mW</title></circle>
+<circle cx="733.2" cy="570.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>U8 (5456 MHz): 2831 mW</title></circle>
+<circle cx="756.5" cy="560.8" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L4 (5473 MHz): 2910 mW</title></circle>
+<circle cx="807.3" cy="550.0" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L5 (5510 MHz): 3002 mW</title></circle>
+<circle cx="858.1" cy="532.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L6 (5547 MHz): 3154 mW</title></circle>
+<circle cx="908.8" cy="510.9" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L7 (5584 MHz): 3334 mW</title></circle>
+<circle cx="959.6" cy="480.1" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>L8 (5621 MHz): 3596 mW</title></circle>
+<circle cx="992.5" cy="435.9" r="5" fill="#dc2626" stroke="white" stroke-width="1.4"><title>E4 (5645 MHz): 3971 mW</title></circle>
+<circle cx="1010.3" cy="428.9" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>R1 (5658 MHz): 4030 mW</title></circle>
+<circle cx="1019.9" cy="410.7" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>E3 (5665 MHz): 4185 mW</title></circle>
+<circle cx="1047.4" cy="381.2" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>E2 (5685 MHz): 4435 mW</title></circle>
+<circle cx="1061.1" cy="378.4" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>R2 (5695 MHz): 4459 mW</title></circle>
+<circle cx="1074.8" cy="347.1" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>E1 (5705 MHz): 4725 mW</title></circle>
+<circle cx="1102.2" cy="312.6" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A8 (5725 MHz): 5018 mW</title></circle>
+<circle cx="1111.8" cy="317.8" r="5" fill="#ca8a04" stroke="white" stroke-width="1.4"><title>R3 (5732 MHz): 4974 mW</title></circle>
+<circle cx="1113.2" cy="299.7" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B1 (5733 MHz): 5127 mW</title></circle>
+<circle cx="1122.8" cy="287.7" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F1 (5740 MHz): 5229 mW</title></circle>
+<circle cx="1129.7" cy="276.9" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A7 (5745 MHz): 5320 mW</title></circle>
+<circle cx="1139.3" cy="271.7" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B2 (5752 MHz): 5365 mW</title></circle>
+<circle cx="1150.2" cy="262.1" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F2 (5760 MHz): 5447 mW</title></circle>
+<circle cx="1157.1" cy="241.4" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A6 (5765 MHz): 5622 mW</title></circle>
+<circle cx="1162.6" cy="256.4" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>R4 (5769 MHz): 5494 mW</title></circle>
+<circle cx="1165.3" cy="241.6" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B3 (5771 MHz): 5621 mW</title></circle>
+<circle cx="1177.7" cy="231.8" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F3 (5780 MHz): 5703 mW</title></circle>
+<circle cx="1184.5" cy="208.6" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A5 (5785 MHz): 5900 mW</title></circle>
+<circle cx="1191.4" cy="215.8" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B4 (5790 MHz): 5839 mW</title></circle>
+<circle cx="1205.1" cy="205.5" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F4 (5800 MHz): 5927 mW</title></circle>
+<circle cx="1212.0" cy="196.3" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A4 (5805 MHz): 6005 mW</title></circle>
+<circle cx="1213.3" cy="202.5" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>R5 (5806 MHz): 5953 mW</title></circle>
+<circle cx="1217.4" cy="206.3" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B5 (5809 MHz): 5920 mW</title></circle>
+<circle cx="1232.5" cy="194.6" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F5 (5820 MHz): 6019 mW</title></circle>
+<circle cx="1239.4" cy="199.9" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A3 (5825 MHz): 5974 mW</title></circle>
+<circle cx="1243.5" cy="211.4" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B6 (5828 MHz): 5877 mW</title></circle>
+<circle cx="1260.0" cy="200.5" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F6 (5840 MHz): 5969 mW</title></circle>
+<circle cx="1264.1" cy="200.6" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>R6 (5843 MHz): 5968 mW</title></circle>
+<circle cx="1266.8" cy="208.1" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A2 (5845 MHz): 5905 mW</title></circle>
+<circle cx="1269.6" cy="217.9" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B7 (5847 MHz): 5821 mW</title></circle>
+<circle cx="1287.4" cy="213.1" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F7 (5860 MHz): 5862 mW</title></circle>
+<circle cx="1294.3" cy="219.1" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>A1 (5865 MHz): 5811 mW</title></circle>
+<circle cx="1295.6" cy="227.5" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>B8 (5866 MHz): 5740 mW</title></circle>
+<circle cx="1314.8" cy="223.8" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>F8 (5880 MHz): 5771 mW</title></circle>
+<circle cx="1314.8" cy="221.5" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>R7 (5880 MHz): 5791 mW</title></circle>
+<circle cx="1321.7" cy="238.3" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>E5 (5885 MHz): 5649 mW</title></circle>
+<circle cx="1349.1" cy="250.0" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>E6 (5905 MHz): 5549 mW</title></circle>
+<circle cx="1365.6" cy="241.0" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>R8 (5917 MHz): 5625 mW</title></circle>
+<circle cx="1376.6" cy="258.3" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>E7 (5925 MHz): 5479 mW</title></circle>
+<circle cx="1404.0" cy="264.8" r="5" fill="#15803d" stroke="white" stroke-width="1.4"><title>E8 (5945 MHz): 5423 mW</title></circle>
+<line x1="94" y1="668" x2="1404" y2="668" stroke="#526072"/>
+<text x="749.0" y="742" text-anchor="middle" class="axis">Frequency, MHz</text>
+<text x="20" y="403.0" transform="rotate(-90 20 403.0)" text-anchor="middle" class="axis">Path-corrected output</text>
+</svg>

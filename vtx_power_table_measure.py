@@ -20,15 +20,15 @@ from typing import Any
 
 from measurement_path import load_measurement_path, offset_db_at_frequency, validate_sensor_frequencies
 from vtx_a1_measure import format_vtx
-from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, read_vtx_power_levels, resolve_port
+from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 from vtx_profiles import load_profile
 from vtx_three_point_test import (
     PLAN_DIRECTORY,
     VTX_PLAN_FILENAMES,
     install_soft_interrupt_handler,
+    resolve_power_indexes,
     switch_and_confirm,
-    verify_vtx_table,
     wait_for_stable_power,
 )
 
@@ -84,26 +84,6 @@ def load_direct_frequency_sweep_plan(plan_path: Path) -> dict[str, Any]:
     measurement_power_levels(profile)
     plan["_profile"] = profile
     return plan
-
-
-def verify_power_levels(client: MspClient, current: dict[str, int | bool | None], expected: list[int]) -> None:
-    """Verify only power levels, allowing direct frequencies outside the FC table."""
-    if current.get("vtx_table_power_levels") != len(expected):
-        raise MspError(
-            f"Flight Controller VTX power table does not match the direct sweep: expected {len(expected)} levels; "
-            f"got {current.get('vtx_table_power_levels')}. FC settings were not changed."
-        )
-    levels = read_vtx_power_levels(client, len(expected))
-    actual = [int(level["value"]) for level in levels]
-    matches = all(
-        value == wanted or (wanted == 0 and str(level["label"]).strip().upper() in {"0", "OFF", "PIT"})
-        for wanted, value, level in zip(expected, actual, levels)
-    )
-    if not matches:
-        raise MspError(
-            f"Flight Controller VTX power levels do not match the direct sweep: expected {expected}; got {actual}. "
-            "FC settings were not changed."
-        )
 
 
 def measurement_points(profile: dict[str, Any]) -> list[dict[str, int | str]]:
@@ -247,9 +227,10 @@ def main() -> int:
     sensor: NrpzSensor | None = None
     safe_reset_error: Exception | None = None
     try:
-        direct_frequency = args.vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
-        plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[args.vtx] if direct_frequency else POWER_TABLE_PLAN_FILENAMES[args.vtx])
-        plan = load_direct_frequency_sweep_plan(plan_path) if direct_frequency else load_power_table_plan(plan_path)
+        direct_plan = args.vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
+        plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[args.vtx] if direct_plan else POWER_TABLE_PLAN_FILENAMES[args.vtx])
+        plan = load_direct_frequency_sweep_plan(plan_path) if direct_plan else load_power_table_plan(plan_path)
+        direct_frequency = bool(plan.get("direct_frequency", True))
         profile = plan["_profile"]
         measurement_path_value = plan.get("measurement_path_profile")
         if not isinstance(measurement_path_value, str):
@@ -277,18 +258,17 @@ def main() -> int:
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
             if direct_frequency:
-                print("Verifying Flight Controller power levels (read-only; frequencies are sent directly)...")
-                verify_power_levels(client, current, list(profile["power_levels_mw"]))
-                print("Power levels match. FC frequency table is not used or changed.")
+                power_indexes = resolve_power_indexes(client, current, [power_mw for _, power_mw in powers] + [25])
+                print("Verifying required FC power levels (read-only; frequencies are sent directly)...")
+                print("Required power levels found. FC frequency table is not used or changed.")
             else:
-                print("Verifying the Flight Controller VTX table (read-only)...")
-                verify_vtx_table(client, current, profile)
-                print("VTX table matches. Persistent FC configuration unchanged.")
+                power_indexes = {power_mw: power_index for power_index, power_mw in powers}
 
             try:
                 sensor = NrpzSensor(args.dll)
                 sensor.open(args.resource)
-                for power_index, power_mw in powers:
+                for matrix_power_index, power_mw in powers:
+                    power_index = power_indexes[power_mw]
                     print(f"\n{power_mw} mW (power index {power_index})")
                     for point in points:
                         label = f"{point['band']}{point['channel']} ({point['frequency_mhz']} MHz)"
@@ -331,7 +311,7 @@ def main() -> int:
                             if sample_index + 1 < args.samples and args.sample_interval:
                                 time.sleep(args.sample_interval)
                         average_mw = fmean(readings)
-                        values[(power_index, str(point["band"]) + str(point["channel"]))] = average_mw
+                        values[(matrix_power_index, str(point["band"]) + str(point["channel"]))] = average_mw
                         write_matrix(output_path, points, powers, values)
                         print(f"  {label:<18} {average_mw:.0f} mW  ({len(readings)} readings; trend {trend['trend']})")
             finally:
@@ -350,7 +330,7 @@ def main() -> int:
                         raise MspError("Flight Controller did not report a usable VTX setting for the 25 mW safety reset.")
                     current = switch_and_confirm(
                         client, latest, band=band or 1, channel=channel or 1, frequency_mhz=frequency_mhz,
-                        power_index=2, settle_time_s=settle_time_s, direct_frequency=direct_frequency,
+                        power_index=power_indexes[25], settle_time_s=settle_time_s, direct_frequency=direct_frequency,
                     )
                     print(f"Final VTX: {format_vtx(current)}")
                 except (MspError, ValueError) as exc:

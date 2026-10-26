@@ -123,6 +123,9 @@ def load_plan(plan_path: Path) -> dict[str, Any]:
         raise ValueError(f"Cannot read reference measurements {resolved_reference_path}: {exc}") from exc
     if not isinstance(reference_bands, dict):
         raise ValueError(f"Reference measurements {resolved_reference_path} have invalid bands.")
+    reference_points = reference.get("points", {})
+    if not isinstance(reference_points, dict):
+        raise ValueError(f"Reference measurements {resolved_reference_path} have invalid points.")
     if reference.get("power_index") != test_power["index"] or reference.get("nominal_power_mw") != test_power.get("nominal_mw"):
         raise ValueError("Reference measurement power does not match the test plan power.")
     for point in points:
@@ -135,10 +138,14 @@ def load_plan(plan_path: Path) -> dict[str, Any]:
             raise ValueError(f"Test point does not exist in VTX profile: {point!r}")
         if profile["bands"][band][channel - 1] != frequency_mhz:
             raise ValueError(f"Test point frequency does not match VTX profile: {point!r}")
-        try:
-            reference_output_mw = reference_bands[band][channel - 1]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError(f"Reference measurement does not contain test point {band}{channel}.") from exc
+        point_key = f"{band}{channel}"
+        if point_key in reference_points:
+            reference_output_mw = reference_points[point_key]
+        else:
+            try:
+                reference_output_mw = reference_bands[band][channel - 1]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise ValueError(f"Reference measurement does not contain test point {point_key}.") from exc
         if not isinstance(reference_output_mw, (int, float)) or reference_output_mw <= 0:
             raise ValueError(f"Reference measurement for {band}{channel} must be positive.")
         point["reference_output_mw"] = reference_output_mw
@@ -215,17 +222,35 @@ def verify_vtx_table(
         raise MspError(f"Flight Controller power levels do not match: expected {power_levels}; got {actual_power_values}. FC settings were not changed.")
 
 
-def verify_power_levels(client: MspClient, current: dict[str, int | bool | None], expected: list[int]) -> None:
-    """Verify power levels when direct frequency control bypasses an FC table."""
-    if current.get("vtx_table_power_levels") != len(expected):
-        raise MspError(f"Flight Controller has {current.get('vtx_table_power_levels')} power levels; expected {len(expected)}.")
-    actual_levels = read_vtx_power_levels(client, len(expected))
-    matches = all(
-        int(level["value"]) == wanted or (wanted == 0 and str(level["label"]).strip().upper() in {"0", "OFF", "PIT"})
-        for wanted, level in zip(expected, actual_levels)
-    )
-    if not matches:
-        raise MspError(f"Flight Controller power levels do not match: expected {expected}; got {[int(level['value']) for level in actual_levels]}.")
+def resolve_power_indexes(
+    client: MspClient,
+    current: dict[str, int | bool | None],
+    required_mw: list[int],
+) -> dict[int, int]:
+    """Return FC power indexes for the required mW values in a universal table.
+
+    Direct-frequency tests deliberately do not care about the FC frequency
+    table.  They only need the required output levels to be present; a table
+    can therefore contain a superset of levels used by other VTX models.
+    """
+    count = current.get("vtx_table_power_levels")
+    if not isinstance(count, int) or not 1 <= count <= 8:
+        raise MspError(f"Flight Controller reports an invalid number of VTX power levels: {count}.")
+    levels = read_vtx_power_levels(client, count)
+    indexes: dict[int, int] = {}
+    for level in levels:
+        value = int(level["value"])
+        index = int(level["index"])
+        if value in required_mw and value not in indexes:
+            indexes[value] = index
+    missing = sorted(set(required_mw) - set(indexes))
+    if missing:
+        available = [int(level["value"]) for level in levels]
+        raise MspError(
+            f"Flight Controller VTX power table is missing required values {missing} mW; "
+            f"available values are {available}. FC settings were not changed."
+        )
+    return indexes
 
 
 def observe_power(
@@ -553,7 +578,9 @@ def main() -> int:
         test_power = plan["test_power"]
         safe_power = plan["safe_power_after_test"]
         thresholds_percent = plan["_reference_thresholds_percent"]
-        direct_frequency = bool(plan.get("direct_frequency", False))
+        # All bundled plans use direct IRC Tramp frequency control. The FC
+        # table is retained only as a shared list of power levels.
+        direct_frequency = bool(plan.get("direct_frequency", True))
         use_color = not args.no_color and sys.stdout.isatty()
         print(f"Plan: {plan['name']}")
         print("Path correction: fixed attenuator minus frequency-dependent path loss.")
@@ -566,9 +593,15 @@ def main() -> int:
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
             if direct_frequency:
-                print("Verifying Flight Controller power levels (read-only; frequencies are sent directly)...")
-                verify_power_levels(client, current, list(profile["power_levels_mw"]))
-                print("Power levels match. FC frequency table is not used or changed.")
+                required_power_values = [int(safe_power["nominal_mw"]), int(test_power["nominal_mw"])]
+                power_indexes = resolve_power_indexes(client, current, required_power_values)
+                test_power_index = power_indexes[int(test_power["nominal_mw"])]
+                safe_power_index = power_indexes[int(safe_power["nominal_mw"])]
+                print("Verifying required FC power levels (read-only; frequencies are sent directly)...")
+                print(
+                    "Required power levels found. FC frequency table is not used or changed: "
+                    + ", ".join(f"{mw} mW=index {power_indexes[mw]}" for mw in required_power_values)
+                )
             else:
                 print("Verifying the Flight Controller VTX table (read-only)...")
                 verify_vtx_table(client, current, profile)
@@ -577,6 +610,8 @@ def main() -> int:
                     f"{current['vtx_table_channels']} channels, "
                     f"{current['vtx_table_power_levels']} power levels. Persistent FC configuration unchanged."
                 )
+                test_power_index = int(test_power["index"])
+                safe_power_index = int(safe_power["index"])
 
             try:
                 if args.manual:
@@ -602,7 +637,7 @@ def main() -> int:
                             band=band,
                             channel=point["channel"],
                             frequency_mhz=point["frequency_mhz"],
-                            power_index=test_power["index"],
+                            power_index=test_power_index,
                             settle_time_s=settle_time_s,
                             direct_frequency=direct_frequency,
                         )
@@ -618,7 +653,7 @@ def main() -> int:
                         measure_and_report_point(
                             sensor,
                             point,
-                            power_index=test_power["index"],
+                            power_index=test_power_index,
                             timeout_ms=args.timeout_ms,
                             observation_time_s=observation_time_s,
                             sample_interval_s=sample_interval_s,
@@ -643,7 +678,7 @@ def main() -> int:
                         print(f"\nSetting {test_power['nominal_mw']} mW, {point['band']}{point['channel']} ({point['frequency_mhz']} MHz)...")
                         current = switch_and_confirm(
                             client, current, band=band, channel=point["channel"],
-                            frequency_mhz=point["frequency_mhz"], power_index=test_power["index"],
+                            frequency_mhz=point["frequency_mhz"], power_index=test_power_index,
                             settle_time_s=settle_time_s,
                             direct_frequency=direct_frequency,
                         )
@@ -658,7 +693,7 @@ def main() -> int:
                         summary = measure_and_report_point(
                             sensor,
                             point,
-                            power_index=test_power["index"],
+                            power_index=test_power_index,
                             timeout_ms=args.timeout_ms,
                             observation_time_s=observation_time_s,
                             sample_interval_s=sample_interval_s,
@@ -698,7 +733,7 @@ def main() -> int:
                         band=latest_band if not safety_direct_frequency else 1,
                         channel=latest_channel if 1 <= latest_channel <= 8 else 1,
                         frequency_mhz=latest_frequency,
-                        power_index=safe_power["index"],
+                        power_index=safe_power_index,
                         settle_time_s=settle_time_s,
                         direct_frequency=safety_direct_frequency,
                     )

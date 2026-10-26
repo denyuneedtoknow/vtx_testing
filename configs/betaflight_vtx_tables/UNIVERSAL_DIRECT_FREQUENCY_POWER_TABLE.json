@@ -1,0 +1,24 @@
+{
+  "description": "Universal VTX tester table: direct IRC Tramp frequency control with all supported power levels",
+  "version": "1.0",
+  "vtx_table": {
+    "bands_list": [
+      {
+        "name": "TEST",
+        "letter": "T",
+        "is_factory_band": false,
+        "frequencies": [5600, 5650, 5700, 5750, 5800, 5850, 5900, 5950]
+      }
+    ],
+    "powerlevels_list": [
+      { "value": 9, "label": "PIT" },
+      { "value": 25, "label": "25" },
+      { "value": 500, "label": "500" },
+      { "value": 2000, "label": "2W" },
+      { "value": 2500, "label": "2.5W" },
+      { "value": 3000, "label": "3W" },
+      { "value": 4000, "label": "4W" },
+      { "value": 5000, "label": "5W" }
+    ]
+  }
+}

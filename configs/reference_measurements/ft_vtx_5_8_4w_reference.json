@@ -3,15 +3,11 @@
   "power_index": 4,
   "nominal_power_mw": 4000,
   "unit": "mW",
-  "description": "Reference values transcribed from the FT4.8-7.2 5W sheet in VTX PWR.xlsx, supplied on 2026-08-18. The measured module is documented as 4 W; values are keyed by the selected 64-channel lower/upper Betaflight test table.",
-  "bands": {
-    "X": [5020, 5050, 5050, 5030, 4980, 4930, 4870, 4820],
-    "D": [4390, 4370, 4370, 4380, 4420, 4470, 4520, 4590],
-    "L": [4430, 4390, 4370, 4360, 4400, 4450, 4500, 4570],
-    "E": [5004, 5000, 4940, 4880, 3830, 3780, 3760, 2150],
-    "A": [5450, 5430, 5420, 5470, 5670, 5600, 5640, 5660],
-    "B": [5660, 5510, 5630, 5610, 5660, 5710, 5690, 5670],
-    "F": [5740, 5730, 5730, 5740, 5740, 5740, 5730, 5730],
-    "H": [4960, 4880, 4850, 4570, 4440, 4280, 4150, 4070]
-  }
+  "description": "Three-point acceptance references for the FT 4.8-7.2 GHz 4 W factory-channel test. The selected M2 / 5695 MHz, E7 / 6870 MHz and G8 / 7210 MHz points use the nominal 4000 mW reference requested on 2026-10-21.",
+  "points": {
+    "M2": 4000,
+    "E7": 4000,
+    "G8": 4000
+  },
+  "bands": {}
 }

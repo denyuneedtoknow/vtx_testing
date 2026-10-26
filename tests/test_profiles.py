@@ -30,8 +30,12 @@ class VtxProfileTests(unittest.TestCase):
     def test_1_2_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile("ft_vtx_1_2_4w.json", "ft_vtx_1_2_4w_reference.json")
 
-    def test_5_8_reference_values_match_profile_bands_and_channels(self):
-        self.assert_reference_matches_profile("ft_vtx_5_8_4w.json", "ft_vtx_5_8_4w_reference.json")
+    def test_5_8_reference_values_are_explicit_for_the_three_selected_points(self):
+        reference = json.loads(
+            (ROOT / "configs/reference_measurements" / "ft_vtx_5_8_4w_reference.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(reference["points"], {"M2": 4000, "E7": 4000, "G8": 4000})
+        self.assertEqual(reference["bands"], {})
 
     def test_legacy_5_8_reference_values_match_profile_bands_and_channels(self):
         self.assert_reference_matches_profile(
@@ -59,24 +63,15 @@ class VtxProfileTests(unittest.TestCase):
             loaded_plan = load_plan(path)
             self.assertTrue(all(point["reference_output_mw"] > 0 for point in loaded_plan["points"]))
 
-    def test_5_8_plan_uses_betaflight_supported_bands(self):
+    def test_5_8_plan_uses_factory_channels(self):
         plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_three_point_4w.json")
         self.assertEqual(
             [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
-            [("X", 1, 4990), ("E", 8, 5945), ("H", 8, 7210)],
+            [("M", 2, 5695), ("E", 7, 6870), ("G", 8, 7210)],
         )
-        self.assertEqual(plan["points"][1]["reference_output_mw"], 2150)
-        self.assertEqual(set(plan["_profile"]["bands"]), {"X", "D", "L", "E", "A", "B", "F", "H"})
+        self.assertEqual([point["reference_output_mw"] for point in plan["points"]], [4000, 4000, 4000])
+        self.assertEqual(set(plan["_profile"]["bands"]), set("ABCDEFGHIJKLMNOPQRSTUV"))
         self.assertEqual(plan["test_power"], {"index": 4, "nominal_mw": 4000})
-
-    def test_5_8_wideband_reference_comes_from_the_4_8_to_7_2_5w_sweep(self):
-        reference = json.loads(
-            (ROOT / "configs/reference_measurements" / "ft_vtx_5_8_4w_reference.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(reference["nominal_power_mw"], 4000)
-        self.assertEqual(reference["bands"]["X"][0], 5020)
-        self.assertEqual(reference["bands"]["E"][7], 2150)
-        self.assertEqual(reference["bands"]["H"][7], 4070)
 
     def test_legacy_5_8_plan_uses_its_original_64_channel_table(self):
         plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_legacy_three_point_4w.json")
@@ -89,6 +84,14 @@ class VtxProfileTests(unittest.TestCase):
             [3930, 4550, 2200],
         )
         self.assertEqual(set(plan["_profile"]["bands"]), {"A", "B", "E", "F", "R", "D", "X", "L"})
+
+    def test_7_2_middle_three_point_uses_the_5w_reference(self):
+        plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_7_2_three_point_5w.json")
+        self.assertEqual(
+            [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
+            [("A", 1, 6110), ("F", 7, 6710), ("H", 8, 7210)],
+        )
+        self.assertEqual(plan["points"][1]["reference_output_mw"], 5000)
 
     def test_new_plans_use_the_supported_1_2_and_2_7_points(self):
         expected_points = {

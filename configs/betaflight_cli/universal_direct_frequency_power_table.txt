@@ -1,0 +1,7 @@
+vtxtable bands 1
+vtxtable channels 8
+vtxtable band 1 TEST T CUSTOM 5600 5650 5700 5750 5800 5850 5900 5950
+vtxtable powerlevels 8
+vtxtable powervalues 9 25 500 2000 2500 3000 4000 5000
+vtxtable powerlabels PIT 25 500 2W 2.5W 3W 4W 5W
+save

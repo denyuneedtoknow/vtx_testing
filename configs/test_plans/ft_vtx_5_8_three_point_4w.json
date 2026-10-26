@@ -1,5 +1,5 @@
 {
-  "name": "FT VTX 4.8-7.2 GHz: lower/upper three-point 4 W test",
+  "name": "FT VTX 4.8-7.2 GHz: factory-channel three-point 4 W test",
   "vtx_profile": "../vtx_profiles/ft_vtx_5_8_4w.json",
   "reference_measurements": "../reference_measurements/ft_vtx_5_8_4w_reference.json",
   "measurement_path_profile": "../measurement_path_control.json",
@@ -10,8 +10,8 @@
   "observation_time_s": 3.0,
   "sample_interval_s": 0.5,
   "points": [
-    { "band": "X", "channel": 1, "frequency_mhz": 4990 },
-    { "band": "E", "channel": 8, "frequency_mhz": 5945 },
-    { "band": "H", "channel": 8, "frequency_mhz": 7210 }
+    { "band": "M", "channel": 2, "frequency_mhz": 5695 },
+    { "band": "E", "channel": 7, "frequency_mhz": 6870 },
+    { "band": "G", "channel": 8, "frequency_mhz": 7210 }
   ]
 }

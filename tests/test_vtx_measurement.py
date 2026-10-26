@@ -15,6 +15,7 @@ from vtx_three_point_test import (
     observe_power,
     power_color,
     reference_chart_line,
+    resolve_power_indexes,
     select_manual_point,
     summarize_readings,
     wait_for_stable_power,
@@ -250,6 +251,33 @@ class VtxMeasurementTests(unittest.TestCase):
             {"vtx_table_bands": 1, "vtx_table_channels": 1, "vtx_table_power_levels": 1},
             profile,
         )
+
+    def test_resolves_required_values_from_a_universal_power_table(self):
+        values = [9, 25, 500, 2000, 2500, 3000, 4000, 5000]
+
+        class ReadOnlyClient:
+            def request(self, command, payload=b""):
+                assert command == MSP_VTXTABLE_POWERLEVEL
+                index = payload[0]
+                value = values[index - 1]
+                label = ("PIT" if index == 1 else str(value)).encode("ascii")
+                return bytes((index,)) + value.to_bytes(2, "little") + bytes((len(label),)) + label
+
+        indexes = resolve_power_indexes(
+            ReadOnlyClient(), {"vtx_table_power_levels": 8}, [25, 2000, 4000, 5000]
+        )
+        self.assertEqual(indexes, {25: 2, 2000: 4, 4000: 7, 5000: 8})
+
+    def test_reports_missing_value_from_universal_power_table(self):
+        class ReadOnlyClient:
+            def request(self, command, payload=b""):
+                index = payload[0]
+                value = (9, 25)[index - 1]
+                label = ("PIT" if index == 1 else str(value)).encode("ascii")
+                return bytes((index,)) + value.to_bytes(2, "little") + bytes((len(label),)) + label
+
+        with self.assertRaisesRegex(MspError, r"missing required values \[4000\] mW"):
+            resolve_power_indexes(ReadOnlyClient(), {"vtx_table_power_levels": 2}, [25, 4000])
 
     def test_rejects_incorrect_power_values_even_when_labels_claim_watts(self):
         profile = {"bands": {"A": [1000]}, "power_levels_mw": [0, 25, 2000, 4000]}
