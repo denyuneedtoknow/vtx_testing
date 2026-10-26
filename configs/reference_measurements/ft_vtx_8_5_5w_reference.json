@@ -3,10 +3,11 @@
   "power_index": 4,
   "nominal_power_mw": 5000,
   "unit": "mW",
-  "description": "Reference values calculated from the supplied VTX 7-8.5 measurement workbook: four 5 W test runs where available.",
-  "bands": {
-    "A": [11350],
-    "I": [0, 0, 0, 0, 8475],
-    "R": [0, 0, 0, 0, 0, 7700]
-  }
+  "description": "Nominal 5 W acceptance references for the FT VTX 8.5 GHz three-point test.",
+  "points": {
+    "A1": 5000,
+    "I5": 5000,
+    "R6": 5000
+  },
+  "bands": {}
 }
