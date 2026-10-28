@@ -44,6 +44,12 @@ Remove-Item -Recurse -Force $releaseDir, $workDir, $specDir -ErrorAction Silentl
     --distpath $releaseDir --workpath $workDir --specpath $specDir `
     vtx_tester_gui.py
 
+& $Python -m PyInstaller --noconfirm --clean --onedir --name VTX-Tester-GUI-Qt `
+    --hidden-import serial `
+    --add-data "configs;configs" `
+    --distpath $releaseDir --workpath $workDir --specpath $specDir `
+    vtx_tester_gui_qt.py
+
 Copy-Item -Recurse -Force (Join-Path $PSScriptRoot "configs") (Join-Path $releaseDir "configs")
 Copy-Item -Force (Join-Path $PSScriptRoot "README.md") (Join-Path $releaseDir "README.md")
 

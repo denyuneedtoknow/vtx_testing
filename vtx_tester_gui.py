@@ -172,7 +172,7 @@ class VtxTesterGui:
         if self.vtx.get() not in GUI_VTX_OPTIONS:
             self.vtx.set("5.8")
         self.three_mode_button.configure(state="disabled" if full_only else "normal")
-        if self.vtx.get() == "8.5":
+        if self.vtx.get() in {"7.2", "8.5"}:
             self.full_power_box.configure(values=("5 W",))
             self.full_power.set("5 W")
             self.manual_power_box.configure(values=("25", "2500", "5000"))

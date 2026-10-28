@@ -5,6 +5,7 @@ dist/
 build/
 *.spec
 logs/
+design-handoff/
 
 .DS_Store
 **/.DS_Store
