@@ -6,6 +6,7 @@
   "source_url": "https://ft.systems/videoperedavach-vtx-ft-7-2/",
   "frequency_range_mhz": [6110, 7210],
   "power_levels_mw": [0, 25, 2500, 5000],
+  "identity_probe": { "band": "A", "channel": 1, "frequency_mhz": 6110 },
   "bands": {
     "A": [6110, 6130, 6150, 6170, 6190, 6210, 6230, 6250],
     "B": [6270, 6290, 6310, 6330, 6350, 6370, 6390, 6410],

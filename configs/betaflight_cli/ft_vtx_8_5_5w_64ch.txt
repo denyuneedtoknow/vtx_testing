@@ -1,0 +1,21 @@
+# FT VTX 7.0-8.5 GHz 5 W: Betaflight-compatible 64-channel subset.
+# Uses bands A-H from ft_vtx_8_5_5w.json (7060-8340 MHz).
+# Standard Betaflight supports no more than 8 VTX bands; U and O are omitted.
+
+vtxtable bands 8
+vtxtable channels 8
+
+vtxtable band 1 BAND_A A CUSTOM 7060 7080 7100 7120 7140 7160 7180 7200
+vtxtable band 2 BAND_B B CUSTOM 7220 7240 7260 7280 7300 7320 7340 7360
+vtxtable band 3 BAND_E E CUSTOM 7380 7400 7420 7440 7460 7480 7500 7520
+vtxtable band 4 BAND_F F CUSTOM 7540 7560 7580 7600 7620 7640 7680 7700
+vtxtable band 5 BAND_I I CUSTOM 7720 7740 7760 7780 7800 7820 7840 7860
+vtxtable band 6 BAND_R R CUSTOM 7880 7900 7920 7940 7960 7980 8000 8020
+vtxtable band 7 BAND_P P CUSTOM 8040 8060 8080 8100 8120 8140 8160 8180
+vtxtable band 8 BAND_H H CUSTOM 8200 8220 8240 8260 8280 8300 8320 8340
+
+vtxtable powerlevels 4
+vtxtable powervalues 9 25 2500 5000
+vtxtable powerlabels PIT 25 2.5W 5W
+
+save

@@ -29,6 +29,8 @@ from vtx_three_point_test import (
     install_soft_interrupt_handler,
     resolve_power_indexes,
     switch_and_confirm,
+    verify_selected_vtx_identity,
+    verify_vtx_table,
     wait_for_stable_power,
 )
 
@@ -47,9 +49,7 @@ POWER_TABLE_PLAN_FILENAMES = {
 DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES = {
     "1.2.all": "ft_vtx_1_2_direct_sweep_4w.json",
     "2.7.all": "ft_vtx_2_7_direct_sweep_4w.json",
-    "5.8.all": "vtx_4_9_7_2_direct_sweep_4w.json",
-    "8.5": "ft_vtx_8_5_direct_sweep_5w.json",
-    "4.9-7.2": "vtx_4_9_7_2_direct_sweep_4w.json",  # Backward-compatible alias.
+    "4.9-7.2": "vtx_4_9_7_2_direct_sweep_4w.json",  # Legacy CLI-only alias.
 }
 
 
@@ -200,7 +200,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, default=3, help="Independent sensor readings to average per cell (default: 3).")
     parser.add_argument("--warmup-readings", type=int, default=1, help="Sensor readings to discard after each switch, before averaging (default: 1).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a cell is measured (default: 3).")
-    parser.add_argument("--stability-tolerance-percent", type=float, default=2.0, help="Maximum peak-to-peak spread for stable readings (default: 2).")
+    parser.add_argument("--stability-tolerance-percent", type=float, default=3.0, help="Maximum peak-to-peak spread for stable readings (default: 3).")
     parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
     parser.add_argument("--trend-samples", type=int, default=10, help="Readings used to observe post-settle output trend (default: 10).")
     parser.add_argument("--trend-threshold-percent", type=float, default=2.0, help="Absolute first-to-last change classified as rising/falling (default: 2).")
@@ -230,7 +230,7 @@ def main() -> int:
         direct_plan = args.vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
         plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[args.vtx] if direct_plan else POWER_TABLE_PLAN_FILENAMES[args.vtx])
         plan = load_direct_frequency_sweep_plan(plan_path) if direct_plan else load_power_table_plan(plan_path)
-        direct_frequency = bool(plan.get("direct_frequency", True))
+        direct_frequency = bool(plan.get("direct_frequency", False))
         profile = plan["_profile"]
         measurement_path_value = plan.get("measurement_path_profile")
         if not isinstance(measurement_path_value, str):
@@ -259,10 +259,24 @@ def main() -> int:
             print(f"Initial VTX: {format_vtx(current)}")
             if direct_frequency:
                 power_indexes = resolve_power_indexes(client, current, [power_mw for _, power_mw in powers] + [25])
+                safe_power_index = power_indexes[25]
                 print("Verifying required FC power levels (read-only; frequencies are sent directly)...")
                 print("Required power levels found. FC frequency table is not used or changed.")
             else:
+                verify_vtx_table(client, current, profile)
+                print("Flight Controller VTX table matches the selected VTX profile.")
                 power_indexes = {power_mw: power_index for power_index, power_mw in powers}
+                safe_power_index = list(profile["power_levels_mw"]).index(25) + 1
+
+            print("Verifying the physical VTX model at 25 mW...")
+            current = verify_selected_vtx_identity(
+                client,
+                current,
+                profile,
+                safe_power_index=safe_power_index,
+                settle_time_s=settle_time_s,
+            )
+            print("Physical VTX frequency confirmed through IRC Tramp.")
 
             try:
                 sensor = NrpzSensor(args.dll)
@@ -330,7 +344,7 @@ def main() -> int:
                         raise MspError("Flight Controller did not report a usable VTX setting for the 25 mW safety reset.")
                     current = switch_and_confirm(
                         client, latest, band=band or 1, channel=channel or 1, frequency_mhz=frequency_mhz,
-                        power_index=power_indexes[25], settle_time_s=settle_time_s, direct_frequency=direct_frequency,
+                        power_index=safe_power_index, settle_time_s=settle_time_s, direct_frequency=direct_frequency,
                     )
                     print(f"Final VTX: {format_vtx(current)}")
                 except (MspError, ValueError) as exc:

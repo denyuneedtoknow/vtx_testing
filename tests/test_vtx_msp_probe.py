@@ -6,9 +6,11 @@ from vtx_msp_probe import (
     MspError,
     find_flight_controller_port,
     msp_v1_request,
+    msp_v2_request,
     parse_vtx_band,
     parse_vtx_power_level,
     parse_vtx_config,
+    parse_vtx_device_status,
     resolve_port,
 )
 
@@ -16,6 +18,9 @@ from vtx_msp_probe import (
 class MspProbeTests(unittest.TestCase):
     def test_encodes_empty_request(self):
         self.assertEqual(msp_v1_request(88), b"$M<\x00XX")
+
+    def test_encodes_native_msp_v2_request(self):
+        self.assertEqual(msp_v2_request(0x3004), b"$X<\x00\x040\x00\x00\xea")
 
     def test_parses_vtx_core_fields(self):
         payload = bytes((3, 2, 5, 1, 0, 0xDC, 0x0A, 1, 0))
@@ -29,6 +34,13 @@ class MspProbeTests(unittest.TestCase):
     def test_rejects_short_vtx_response(self):
         with self.assertRaises(MspError):
             parse_vtx_config(b"\x00" * 8)
+
+    def test_parses_live_vtx_device_status(self):
+        payload = bytes((4, 1, 1, 5, 5, 1, 2, 1)) + (7800).to_bytes(2, "little") + bytes((1,)) + (0).to_bytes(4, "little")
+        status = parse_vtx_device_status(payload)
+        self.assertEqual(status["device_type"], 4)
+        self.assertTrue(status["ready"])
+        self.assertEqual(status["frequency_mhz"], 7800)
 
     def test_parses_vtx_power_table_level(self):
         self.assertEqual(

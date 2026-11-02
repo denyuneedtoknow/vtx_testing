@@ -8,6 +8,7 @@ from vtx_three_point_test import (
     ANSI_GREEN,
     ANSI_RED,
     ANSI_YELLOW,
+    confirm_actual_vtx_frequency,
     format_power,
     install_soft_interrupt_handler,
     milliwatts_to_dbm,
@@ -17,15 +18,21 @@ from vtx_three_point_test import (
     reference_chart_line,
     resolve_power_indexes,
     select_manual_point,
+    switch_and_confirm,
     summarize_readings,
     wait_for_stable_power,
     verify_vtx_table,
+    verify_selected_vtx_identity,
 )
 from vtx_msp_probe import MSP_VTXTABLE_BAND, MSP_VTXTABLE_POWERLEVEL, MspError
 from unittest.mock import patch
 
 
 class VtxMeasurementTests(unittest.TestCase):
+    @staticmethod
+    def _live_status_payload(frequency_mhz):
+        return bytes((4, 1, 1, 1, 1, 1, 2, 1)) + frequency_mhz.to_bytes(2, "little") + bytes((1,)) + (0).to_bytes(4, "little")
+
     def test_soft_interrupt_handler_is_a_noop_outside_windows(self):
         with patch("vtx_three_point_test.sys.platform", "linux"), patch("vtx_three_point_test.signal.signal") as register:
             install_soft_interrupt_handler()
@@ -184,6 +191,73 @@ class VtxMeasurementTests(unittest.TestCase):
         self.assertEqual(sensor.frequency_hz, 5_510_000_000)
         self.assertIn("5510", output.getvalue())
         self.assertEqual(summary["average_mw"], 4550.0)
+
+    def test_confirms_frequency_reported_by_physical_tramp_vtx(self):
+        class Client:
+            def request_v2(self, command, payload=b""):
+                return VtxMeasurementTests._live_status_payload(7800)
+
+        status = confirm_actual_vtx_frequency(Client(), 7800, timeout_s=0)
+        self.assertEqual(status["frequency_mhz"], 7800)
+
+    def test_switch_accepts_stored_fc_settings_even_when_legacy_ready_flag_is_false(self):
+        current = {
+            "power_index": 2, "pit_mode": False, "low_power_disarm": 0,
+            "pit_mode_frequency_mhz": 0,
+        }
+
+        class Client:
+            def request(self, command, payload=b""):
+                if command == 89:
+                    return b""
+                if command == 88:
+                    return bytes((4, 1, 1, 2, 0)) + (7060).to_bytes(2, "little") + bytes((0, 0))
+                raise AssertionError(command)
+
+        with patch("vtx_three_point_test.time.sleep", return_value=None):
+            updated = switch_and_confirm(
+                Client(), current, band=1, channel=1, frequency_mhz=7060,
+                power_index=2, settle_time_s=0,
+            )
+        self.assertFalse(updated["ready"])
+        self.assertEqual(updated["frequency_mhz"], 7060)
+
+    def test_rejects_fc_setting_when_physical_vtx_remains_on_another_frequency(self):
+        class Client:
+            def request_v2(self, command, payload=b""):
+                return VtxMeasurementTests._live_status_payload(7060)
+
+        with self.assertRaisesRegex(MspError, r"requested 7800 MHz.*reports 7060 MHz"):
+            confirm_actual_vtx_frequency(Client(), 7800, timeout_s=0)
+
+    def test_identity_probe_blocks_wrong_vtx_before_measurement(self):
+        profile = {
+            "model": "8.5 GHz",
+            "identity_probe": {"band": "I", "channel": 1, "frequency_mhz": 7800},
+            "bands": {"A": [7060], "I": [7800]},
+        }
+        current = {
+            "power_index": 2, "pit_mode": False, "low_power_disarm": 0,
+            "pit_mode_frequency_mhz": 0, "band": 1, "channel": 1,
+            "frequency_mhz": 7060, "ready": True,
+        }
+
+        class Client:
+            def request(self, command, payload=b""):
+                if command == 89:
+                    return b""
+                if command == 88:
+                    return bytes((4, 2, 1, 2, 0)) + (7800).to_bytes(2, "little") + bytes((1, 0))
+                raise AssertionError(command)
+
+            def request_v2(self, command, payload=b""):
+                return VtxMeasurementTests._live_status_payload(7060)
+
+        with patch("vtx_three_point_test.time.sleep", return_value=None):
+            with self.assertRaisesRegex(MspError, "could not be confirmed for the selected profile"):
+                verify_selected_vtx_identity(
+                    Client(), current, profile, safe_power_index=2, settle_time_s=0,
+                )
 
     def test_verifies_complete_vtx_table_without_writing(self):
         profile = {

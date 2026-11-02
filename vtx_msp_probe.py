@@ -22,6 +22,10 @@ MSP_VTX_CONFIG = 88
 MSP_SET_VTX_CONFIG = 89
 MSP_VTXTABLE_BAND = 137
 MSP_VTXTABLE_POWERLEVEL = 138
+MSP_SET_VTXTABLE_BAND = 227
+MSP_SET_VTXTABLE_POWERLEVEL = 228
+MSP_EEPROM_WRITE = 250
+MSP2_GET_VTX_DEVICE_STATUS = 0x3004
 DEFAULT_SCAN_TIMEOUT_S = 1.0
 
 
@@ -52,6 +56,24 @@ def msp_v1_request(command: int, payload: bytes = b"") -> bytes:
     for byte in payload:
         checksum ^= byte
     return b"$M<" + bytes((len(payload), command)) + payload + bytes((checksum,))
+
+
+def crc8_dvb_s2(data: bytes) -> int:
+    """Return the CRC-8/DVB-S2 checksum used by native MSP v2 frames."""
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0xD5) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+    return crc
+
+
+def msp_v2_request(command: int, payload: bytes = b"") -> bytes:
+    """Build a native MSP v2 request frame."""
+    if not 0 <= command <= 0xFFFF or len(payload) > 0xFFFF:
+        raise ValueError("MSP v2 supports 16-bit command IDs and payload sizes.")
+    body = bytes((0,)) + command.to_bytes(2, "little") + len(payload).to_bytes(2, "little") + payload
+    return b"$X<" + body + bytes((crc8_dvb_s2(body),))
 
 
 def parse_vtx_config(payload: bytes) -> dict[str, int | bool | None]:
@@ -87,6 +109,30 @@ def parse_vtx_config(payload: bytes) -> dict[str, int | bool | None]:
         result["vtx_table_channels"] = payload[13]
         result["vtx_table_power_levels"] = payload[14]
     return result
+
+
+def parse_vtx_device_status(payload: bytes) -> dict[str, int | bool]:
+    """Parse the live VTX state returned by MSP2_GET_VTX_DEVICE_STATUS.
+
+    Unlike MSP_VTX_CONFIG, this response is populated through the active VTX
+    driver's getters.  For IRC Tramp its frequency is the value last reported
+    by the physical transmitter, not merely the FC's requested setting.
+    """
+    if len(payload) < 15:
+        raise MspError(f"MSP2_GET_VTX_DEVICE_STATUS response is too short ({len(payload)} bytes).")
+    return {
+        "device_type": payload[0],
+        "ready": bool(payload[1]),
+        "band_channel_available": bool(payload[2]),
+        "band": payload[3],
+        "channel": payload[4],
+        "power_index_available": bool(payload[5]),
+        "power_index": payload[6],
+        "frequency_available": bool(payload[7]),
+        "frequency_mhz": int.from_bytes(payload[8:10], "little"),
+        "status_available": bool(payload[10]),
+        "status": int.from_bytes(payload[11:15], "little"),
+    }
 
 
 def parse_vtx_power_level(payload: bytes) -> dict[str, int | str]:
@@ -171,6 +217,19 @@ class MspClient:
             raise MspError(f"Unexpected MSP direction {frame.direction!r}.")
         return frame.payload
 
+    def request_v2(self, command: int, payload: bytes = b"") -> bytes:
+        self._serial.reset_input_buffer()
+        self._serial.write(msp_v2_request(command, payload))
+        self._serial.flush()
+        frame = self._read_frame()
+        if frame.command != command:
+            raise MspError(f"Received MSP command {frame.command}; expected {command}.")
+        if frame.direction == "!":
+            raise MspError(f"Flight Controller rejected MSP v2 command {command:#06x}.")
+        if frame.direction != ">":
+            raise MspError(f"Unexpected MSP direction {frame.direction!r}.")
+        return frame.payload
+
     def _read_frame(self) -> MspFrame:
         deadline = time.monotonic() + self._timeout_s
         window = bytearray()
@@ -179,22 +238,37 @@ class MspClient:
             if not byte:
                 continue
             window += byte
-            if len(window) > 3:
+            if len(window) > 2:
                 del window[0]
-            if bytes(window) != b"$M":
+            marker = bytes(window)
+            if marker not in {b"$M", b"$X"}:
                 continue
             direction = self._serial.read(1)
-            header = self._serial.read(2)
-            if len(direction) != 1 or len(header) != 2:
+            if len(direction) != 1:
                 break
-            payload_size, command = header
-            payload = self._serial.read(payload_size)
-            checksum = self._serial.read(1)
-            if len(payload) != payload_size or len(checksum) != 1:
-                break
-            calculated = payload_size ^ command
-            for item in payload:
-                calculated ^= item
+            if marker == b"$M":
+                header = self._serial.read(2)
+                if len(header) != 2:
+                    break
+                payload_size, command = header
+                payload = self._serial.read(payload_size)
+                checksum = self._serial.read(1)
+                if len(payload) != payload_size or len(checksum) != 1:
+                    break
+                calculated = payload_size ^ command
+                for item in payload:
+                    calculated ^= item
+            else:
+                header = self._serial.read(5)
+                if len(header) != 5:
+                    break
+                command = int.from_bytes(header[1:3], "little")
+                payload_size = int.from_bytes(header[3:5], "little")
+                payload = self._serial.read(payload_size)
+                checksum = self._serial.read(1)
+                if len(payload) != payload_size or len(checksum) != 1:
+                    break
+                calculated = crc8_dvb_s2(header + payload)
             if checksum[0] != calculated:
                 raise MspError("Invalid MSP response checksum.")
             return MspFrame(direction.decode("ascii", errors="replace"), command, payload)

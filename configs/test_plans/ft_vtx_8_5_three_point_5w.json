@@ -1,9 +1,8 @@
 {
   "name": "FT VTX 8.5 GHz: three-point 5 W test",
-  "vtx_profile": "../vtx_profiles/ft_vtx_8_5_5w.json",
+  "vtx_profile": "../vtx_profiles/ft_vtx_8_5_5w_64ch.json",
   "reference_measurements": "../reference_measurements/ft_vtx_8_5_5w_reference.json",
   "measurement_path_profile": "../measurement_path_control.json",
-  "direct_frequency": true,
   "test_power": { "index": 4, "nominal_mw": 5000 },
   "safe_power_after_test": { "index": 2, "nominal_mw": 25 },
   "reference_thresholds_percent": { "green_min": 90, "yellow_min": 80 },

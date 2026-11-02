@@ -32,7 +32,8 @@ from vtx_a1_measure import format_vtx
 from vtx_msp_probe import MSP_VTX_CONFIG, MspClient, MspError, open_serial, parse_vtx_config, read_vtx_power_levels, resolve_port
 from vtx_power_logger import NrpzError, NrpzSensor, watts_to_millwatts
 from vtx_power_table_measure import DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES, POWER_TABLE_PLAN_FILENAMES, load_direct_frequency_sweep_plan, load_power_table_plan, measurement_points, measurement_power_levels
-from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, load_plan, power_status, switch_and_confirm, wait_for_stable_power
+from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, confirm_actual_vtx_frequency, load_plan, power_status, switch_and_confirm, wait_for_stable_power
+from vtx_table import install_vtx_table, load_vtx_table
 
 ROOT = Path(__file__).resolve().parent
 LOG_DIRECTORY = ROOT / "logs"
@@ -113,18 +114,19 @@ class VtxTesterQt(QMainWindow):
         header = QHBoxLayout(); header.setContentsMargins(0, 0, 0, 0); title = QLabel("VTX Tester"); title.setObjectName("title"); header.addWidget(title); header.addStretch(); self.theme_button = QPushButton(); self.theme_button.setObjectName("themeToggle"); self.theme_button.setFixedSize(96, 36); self.theme_button.clicked.connect(self._toggle_theme); header.addWidget(self.theme_button); layout.addLayout(header)
         panel = QFrame(); panel.setObjectName("panel"); panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum); grid = QGridLayout(panel); grid.setContentsMargins(18, 14, 18, 14); grid.setHorizontalSpacing(10); grid.setVerticalSpacing(10)
         grid.addWidget(QLabel("VTX"), 0, 0); self.vtx = QComboBox(); self.vtx.setFixedWidth(132); self.vtx.addItems(GUI_VTX_OPTIONS); self.vtx.setCurrentText("5.8"); self.vtx.currentTextChanged.connect(self._sync_mode); grid.addWidget(self.vtx, 0, 1)
-        com_label = QLabel("COM port (optional)"); com_label.setMinimumWidth(142); grid.addWidget(com_label, 0, 2); self.port = QLineEdit(); self.port.setFixedWidth(220); grid.addWidget(self.port, 0, 3)
-        readings_label = QLabel("Output readings per point/cell"); readings_label.setMinimumWidth(230); grid.addWidget(readings_label, 0, 4); self.samples = QComboBox(); self.samples.setFixedWidth(78); self.samples.addItems([str(value) for value in range(1, 31)]); self.samples.setCurrentText("3"); grid.addWidget(self.samples, 0, 5)
-        self.sound = QPushButton("🔔︎"); self.sound.setObjectName("soundButton"); self.sound.setFixedWidth(44); self.sound.setCheckable(True); self.sound.setChecked(True); self.sound.clicked.connect(lambda: self.sound.setText("🔔︎" if self.sound.isChecked() else "🔕︎")); grid.addWidget(self.sound, 0, 7); grid.setColumnStretch(6, 1)
+        self.set_table_button = QPushButton("Set table"); self.set_table_button.clicked.connect(self._set_table); grid.addWidget(self.set_table_button, 0, 2)
+        com_label = QLabel("COM port (optional)"); com_label.setMinimumWidth(142); grid.addWidget(com_label, 0, 3); self.port = QLineEdit(); self.port.setFixedWidth(84); self.port.setMaxLength(8); self.port.setPlaceholderText("COM83"); grid.addWidget(self.port, 0, 4)
+        readings_label = QLabel("Output readings per point/cell"); readings_label.setMinimumWidth(230); grid.addWidget(readings_label, 0, 5); self.samples = QComboBox(); self.samples.setFixedWidth(78); self.samples.addItems([str(value) for value in range(1, 31)]); self.samples.setCurrentText("3"); grid.addWidget(self.samples, 0, 6)
+        self.sound = QPushButton("🔔︎"); self.sound.setObjectName("soundButton"); self.sound.setFixedWidth(44); self.sound.setCheckable(True); self.sound.setChecked(True); self.sound.clicked.connect(lambda: self.sound.setText("🔔︎" if self.sound.isChecked() else "🔕︎")); grid.addWidget(self.sound, 0, 8); grid.setColumnStretch(7, 1)
         self.mode_group = QButtonGroup(self); modes = QHBoxLayout(); self.mode_buttons = {}
         for key, text in (("three", "Three-point test"), ("full", "Full power table"), ("manual", "Manual frequency switch")):
             button = QPushButton(text); button.setCheckable(True); button.setFixedHeight(38); button.setObjectName("modeCard"); button.clicked.connect(lambda checked, value=key: self._set_mode(value)); self.mode_group.addButton(button); self.mode_buttons[key] = button; modes.addWidget(button)
-        self.mode_buttons["three"].setChecked(True); modes.addStretch(); grid.addLayout(modes, 1, 0, 1, 8)
+        self.mode_buttons["three"].setChecked(True); modes.addStretch(); grid.addLayout(modes, 1, 0, 1, 9)
         self.option_stack = QStackedWidget(); self.option_stack.setStyleSheet("QStackedWidget { background: transparent; }"); blank = QWidget(); self.full_options = QWidget(); self.full_options.setObjectName("fullOptions"); self.full_options.setStyleSheet("QWidget#fullOptions { background: transparent; }"); f = QHBoxLayout(self.full_options); f.setContentsMargins(0,0,0,0); f.addWidget(QLabel("Measure power")); self.full_power = QComboBox(); self.full_power.setFixedWidth(118); f.addWidget(self.full_power); f.addWidget(QLabel("Stabilization delay, s")); self.settle = QSpinBox(); self.settle.setFixedWidth(92); self.settle.setRange(0,120); self.settle.setValue(3); f.addWidget(self.settle); f.addStretch()
-        self.manual_options = QWidget(); self.manual_options.setObjectName("manualOptions"); self.manual_options.setStyleSheet("QWidget#manualOptions { background: transparent; }"); m = QHBoxLayout(self.manual_options); m.setContentsMargins(0,0,0,0); m.addWidget(QLabel("Frequency, MHz")); self.frequency = QComboBox(); self.frequency.setMinimumWidth(220); m.addWidget(self.frequency); m.addWidget(QLabel("Power, mW")); self.power = QComboBox(); self.power.setFixedWidth(100); m.addWidget(self.power); m.addStretch(); self.option_stack.addWidget(blank); self.option_stack.addWidget(self.full_options); self.option_stack.addWidget(self.manual_options); self.option_stack.setMaximumHeight(0); grid.addWidget(self.option_stack, 2, 0, 1, 8)
+        self.manual_options = QWidget(); self.manual_options.setObjectName("manualOptions"); self.manual_options.setStyleSheet("QWidget#manualOptions { background: transparent; }"); m = QHBoxLayout(self.manual_options); m.setContentsMargins(0,0,0,0); m.addWidget(QLabel("Frequency, MHz")); self.frequency = QComboBox(); self.frequency.setMinimumWidth(220); m.addWidget(self.frequency); m.addWidget(QLabel("Power, mW")); self.power = QComboBox(); self.power.setFixedWidth(100); m.addWidget(self.power); m.addStretch(); self.option_stack.addWidget(blank); self.option_stack.addWidget(self.full_options); self.option_stack.addWidget(self.manual_options); self.option_stack.setMaximumHeight(0); grid.addWidget(self.option_stack, 2, 0, 1, 9)
         self.status = QLabel(); self.status.setObjectName("status"); self.status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); self.status.setContentsMargins(10, 3, 10, 3)
         action_row = QWidget(); action_row.setObjectName("actionRow"); action_row.setStyleSheet("QWidget#actionRow { background: transparent; }"); action_grid = QGridLayout(action_row); action_grid.setContentsMargins(0, 0, 0, 0); action_grid.setColumnStretch(0, 1); action_grid.setColumnStretch(1, 1); action_grid.setColumnStretch(2, 1)
-        actions = QWidget(); actions.setObjectName("actionButtons"); actions.setStyleSheet("QWidget#actionButtons { background: transparent; }"); actions_layout = QHBoxLayout(actions); actions_layout.setContentsMargins(0, 0, 0, 0); self.start_button = QPushButton("Start test"); self.start_button.setFixedHeight(36); self.start_button.setObjectName("primary"); self.start_button.clicked.connect(self.start); self.stop_button = QPushButton("Stop"); self.stop_button.setFixedHeight(36); self.stop_button.setEnabled(False); self.stop_button.clicked.connect(self.stop); actions_layout.addWidget(self.start_button); actions_layout.addWidget(self.stop_button); action_grid.addWidget(actions, 0, 0, alignment=Qt.AlignLeft); action_grid.addWidget(self.status, 0, 1, alignment=Qt.AlignHCenter); grid.addWidget(action_row,3,0,1,8); layout.addWidget(panel)
+        actions = QWidget(); actions.setObjectName("actionButtons"); actions.setStyleSheet("QWidget#actionButtons { background: transparent; }"); actions_layout = QHBoxLayout(actions); actions_layout.setContentsMargins(0, 0, 0, 0); self.start_button = QPushButton("Start test"); self.start_button.setFixedHeight(36); self.start_button.setObjectName("primary"); self.start_button.clicked.connect(self.start); self.stop_button = QPushButton("Stop"); self.stop_button.setFixedHeight(36); self.stop_button.setEnabled(False); self.stop_button.clicked.connect(self.stop); actions_layout.addWidget(self.start_button); actions_layout.addWidget(self.stop_button); action_grid.addWidget(actions, 0, 0, alignment=Qt.AlignLeft); action_grid.addWidget(self.status, 0, 1, alignment=Qt.AlignHCenter); grid.addWidget(action_row,3,0,1,9); layout.addWidget(panel)
         tabs = QTabWidget(); result = QWidget(); rv = QVBoxLayout(result); rv.setContentsMargins(12, 12, 12, 12); rv.setSpacing(8); self.steps = QTableWidget(0,2); self.steps.setHorizontalHeaderLabels(["Step","Result"]); self.steps.verticalHeader().setVisible(False); self.steps.verticalHeader().setDefaultSectionSize(20); self.steps.horizontalHeader().setFixedHeight(24); self.steps.horizontalHeader().setStretchLastSection(True); self.steps.setMinimumHeight(145); self.steps.setMaximumHeight(185); rv.addWidget(self.steps); self.chart = ComparisonChart(self); rv.addWidget(self.chart, 1); tabs.addTab(result,"Result summary")
         log = QWidget(); lv = QVBoxLayout(log); self.log = QTableWidget(0,1); self.log.setHorizontalHeaderLabels(["Output"]); self.log.horizontalHeader().setStretchLastSection(True); lv.addWidget(self.log); tabs.addTab(log,"Live test log"); layout.addWidget(tabs,1); self._set_status("Ready. Choose a test and press Start test."); self._sync_mode()
 
@@ -149,7 +151,7 @@ class VtxTesterQt(QMainWindow):
         if self._mode()=="manual": self._sync_manual_frequencies()
     def _sync_manual_frequencies(self) -> None:
         try:
-            v=self.vtx.currentText(); plan=load_direct_frequency_sweep_plan(PLAN_DIRECTORY/DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[v]) if v in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES else (load_power_table_plan(PLAN_DIRECTORY/POWER_TABLE_PLAN_FILENAMES[v]) if v in POWER_TABLE_PLAN_FILENAMES else load_plan(PLAN_DIRECTORY/VTX_PLAN_FILENAMES[v])); values=[f"{b}{i} · {freq} MHz" for b,fs in plan["_profile"]["bands"].items() for i,freq in enumerate(fs,1) if isinstance(freq,int) and freq>0]
+            values=[f"{b}{i} · {freq} MHz" for b,fs in load_vtx_table(self.vtx.currentText())["bands"].items() for i,freq in enumerate(fs,1) if freq > 0]
         except (OSError, ValueError, KeyError, TypeError): values=[]
         self.frequency.clear(); self.frequency.addItems(values)
     def _tool_command(self, executable: str, script: str) -> list[str]:
@@ -158,7 +160,7 @@ class VtxTesterQt(QMainWindow):
     def _command(self) -> list[str]:
         vtx, mode, stamp=self.vtx.currentText(),self._mode(),datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         if mode=="three": self.output_path=LOG_DIRECTORY/f"gui-three-point-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Three-Point-Test","vtx_three_point_test.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path)]
-        else: self.output_path=LOG_DIRECTORY/f"gui-power-table-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Power-Table","vtx_power_table_measure.py"),"--vtx","5.8.all" if vtx=="5.8" else vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path),"--power",POWER_SELECTIONS[self.full_power.currentText()],"--settle-time",str(self.settle.value())]
+        else: self.output_path=LOG_DIRECTORY/f"gui-power-table-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Power-Table","vtx_power_table_measure.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path),"--power",POWER_SELECTIONS[self.full_power.currentText()],"--settle-time",str(self.settle.value())]
         if self.port.text().strip(): command.extend(["--port",self.port.text().strip()])
         return command
     def start(self) -> None:
@@ -170,12 +172,24 @@ class VtxTesterQt(QMainWindow):
         if self._mode()=="three": self._prepare_preview()
         else: self._prepare_full_progress()
         self._set_status("Test is running. Key switching and measurement steps will appear below."); self.chart.update(); self._line("$ "+" ".join(command)); self.start_button.setEnabled(False); self.stop_button.setEnabled(True); threading.Thread(target=self._run_process,args=(command,),daemon=True).start()
+    def _set_table(self) -> None:
+        vtx=self.vtx.currentText()
+        if self.run_active or QMessageBox.question(self,"Replace VTX table",f"Replace the Flight Controller VTX table with the {vtx} table?\n\nThe FC must be disarmed. The VTX will be left at 25 mW.") != QMessageBox.Yes: return
+        try: table=load_vtx_table(vtx)
+        except ValueError as exc: QMessageBox.critical(self,"VTX table",str(exc)); return
+        self.set_table_button.setEnabled(False); self.start_button.setEnabled(False); self._set_status("Writing the selected VTX table to the Flight Controller…"); threading.Thread(target=self._table_worker,args=(table,),daemon=True).start()
+    def _table_worker(self, table:dict) -> None:
+        try:
+            port=resolve_port(self.port.text().strip() or None,115200,2.0)
+            with open_serial(port,115200,2.0) as serial_port: install_vtx_table(MspClient(serial_port,2.0),table)
+            self.events.put(("table_done",str(table["model"])))
+        except Exception as exc: self.events.put(("table_error",str(exc)))
     def _prepare_preview(self) -> None:
         try: self.results=[{"label":f"{x['band']}{x['channel']} · {x['frequency_mhz']} MHz","frequency":int(x["frequency_mhz"]),"reference":float(x["reference_output_mw"]),"samples":[],"status":"PENDING"} for x in load_plan(PLAN_DIRECTORY/VTX_PLAN_FILENAMES[self.vtx.currentText()])["points"]]; self.chart.setMinimumHeight(70 + 72 * len(self.results)); self.result_message="Live measurement: every new sample and final average are shown below."
         except (OSError,ValueError,KeyError): self.results=[]
     def _prepare_full_progress(self) -> None:
         try:
-            v="5.8.all" if self.vtx.currentText()=="5.8" else self.vtx.currentText(); direct=v in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES; plan=(load_direct_frequency_sweep_plan if direct else load_power_table_plan)(PLAN_DIRECTORY/(DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[v] if direct else POWER_TABLE_PLAN_FILENAMES[v])); selected=[x for x in measurement_power_levels(plan["_profile"]) if POWER_SELECTIONS[self.full_power.currentText()] == "all" or x[1]==int(POWER_SELECTIONS[self.full_power.currentText()])]; self.full_progress=(0,len(measurement_points(plan["_profile"]))*len(selected),int(self.samples.currentText())); self.result_message="Full-table progress"
+            v=self.vtx.currentText(); direct=v in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES; plan=(load_direct_frequency_sweep_plan if direct else load_power_table_plan)(PLAN_DIRECTORY/(DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[v] if direct else POWER_TABLE_PLAN_FILENAMES[v])); selected=[x for x in measurement_power_levels(plan["_profile"]) if POWER_SELECTIONS[self.full_power.currentText()] == "all" or x[1] == int(POWER_SELECTIONS[self.full_power.currentText()])]; self.full_progress=(0,len(measurement_points(plan["_profile"]))*len(selected),int(self.samples.currentText())); self.result_message="Full-table progress"
         except (OSError,ValueError,KeyError): self.full_progress=None
     def _run_process(self, command: list[str]) -> None:
         try:
@@ -226,6 +240,8 @@ class VtxTesterQt(QMainWindow):
                 elif kind=="manual_done":
                     if self.results: self.results[0]["measured"]=float(value); self.results[0]["status"]="N/A"
                     self.run_active=False; self.start_button.setEnabled(True); self.stop_button.setEnabled(False); self._set_status("Manual measurement completed. The VTX remains at the selected frequency and power."); self._play_completion_sound(); self.chart.update()
+                elif kind=="table_done": self.set_table_button.setEnabled(True); self.start_button.setEnabled(True); self._sync_manual_frequencies(); self._set_status("VTX table installed and saved. The VTX is set to 25 mW."); self._line("Installed VTX table: "+value)
+                elif kind=="table_error": self.set_table_button.setEnabled(True); self.start_button.setEnabled(True); self._set_status("VTX table was not installed. See the technical log."); self._line("Error: "+value); QMessageBox.critical(self,"VTX table",value)
         except queue.Empty: pass
     def _load_result(self,path:Path)->None:
         if "power-table" in path.name: self.results=[]; self.result_message=f"Full table saved: {path.name}."; self.chart.update(); return
@@ -241,21 +257,23 @@ class VtxTesterQt(QMainWindow):
         except (OSError,ValueError,KeyError,csv.Error) as exc: self.results=[]; self.result_message=f"Cannot read results: {exc}"
         self.chart.update()
     def _switch_manual(self) -> None:
-        match=re.search(r"(\d+) MHz$",self.frequency.currentText())
+        match=re.fullmatch(r"(.)(\d+) · (\d+) MHz",self.frequency.currentText())
         if not match: QMessageBox.critical(self,"Invalid manual setting","Choose a frequency from the VTX channel list."); return
-        frequency,power=int(match.group(1)),int(self.power.currentText())
+        band,channel,frequency,power=match.group(1),int(match.group(2)),int(match.group(3)),int(self.power.currentText())
         try: validate_sensor_frequencies(load_measurement_path(ROOT/"configs"/"measurement_path_control.json"),[frequency])
         except ValueError as exc: QMessageBox.critical(self,"Invalid manual setting",str(exc)); return
-        self.results=[{"label":self.frequency.currentText(),"frequency":frequency,"reference":float(power),"samples":[],"status":"MEASURING"}]; self.current_frequency=frequency; self.run_active=True; self.start_button.setEnabled(False); self.stop_button.setEnabled(True); self._set_status("Switching VTX, waiting for stable output, then measuring samples."); self._line(f"Switching directly to {frequency} MHz / {power} mW…"); self.chart.update(); threading.Thread(target=self._manual_worker,args=(frequency,power,int(self.samples.currentText())),daemon=True).start()
-    def _manual_worker(self, frequency:int, power:int, sample_count:int)->None:
+        self.results=[{"label":self.frequency.currentText(),"frequency":frequency,"reference":float(power),"samples":[],"status":"MEASURING"}]; self.current_frequency=frequency; self.run_active=True; self.start_button.setEnabled(False); self.stop_button.setEnabled(True); self._set_status("Switching VTX, waiting for stable output, then measuring samples."); self._line(f"Switching table channel {band}{channel} / {power} mW…"); self.chart.update(); threading.Thread(target=self._manual_worker,args=(band,channel,frequency,power,int(self.samples.currentText())),daemon=True).start()
+    def _manual_worker(self, band:str, channel:int, frequency:int, power:int, sample_count:int)->None:
         sensor=None
         try:
             port=resolve_port(self.port.text().strip() or None,115200,2.0)
             with open_serial(port,115200,2.0) as serial_port:
                 client=MspClient(serial_port,2.0); current=parse_vtx_config(client.request(MSP_VTX_CONFIG)); levels=read_vtx_power_levels(client,int(current.get("vtx_table_power_levels") or 0)); matching=[int(level["index"]) for level in levels if int(level["value"])==power]
                 if not matching: raise MspError(f"Flight Controller VTX table has no {power} mW power level.")
-                updated=switch_and_confirm(client,current,band=1,channel=1,frequency_mhz=frequency,power_index=matching[0],settle_time_s=3.0,direct_frequency=True)
-            self.events.put(("manual","VTX active: "+format_vtx(updated))); path=load_measurement_path(ROOT/"configs"/"measurement_path_control.json"); sensor=NrpzSensor(); sensor.open("*"); sensor.configure(frequency*1_000_000,16); sensor.set_level_offset(offset_db_at_frequency(path,frequency)); wait_for_stable_power(sensor,timeout_ms=5_000,sample_interval_s=.5,required_samples=3,tolerance_percent=2.0,max_wait_s=15.0); readings=[]
+                profile=load_vtx_table(self.vtx.currentText()); band_index=list(profile["bands"]).index(band)+1
+                updated=switch_and_confirm(client,current,band=band_index,channel=channel,frequency_mhz=frequency,power_index=matching[0],settle_time_s=3.0,direct_frequency=False)
+                confirm_actual_vtx_frequency(client,frequency,timeout_s=3.0)
+            self.events.put(("manual","VTX active: "+format_vtx(updated))); path=load_measurement_path(ROOT/"configs"/"measurement_path_control.json"); sensor=NrpzSensor(); sensor.open("*"); sensor.configure(frequency*1_000_000,16); sensor.set_level_offset(offset_db_at_frequency(path,frequency)); wait_for_stable_power(sensor,timeout_ms=5_000,sample_interval_s=.5,required_samples=3,tolerance_percent=3.0,max_wait_s=15.0); readings=[]
             for index in range(1,sample_count+1):
                 value=watts_to_millwatts(sensor.read_watts(5_000)); readings.append(value); self.events.put(("manual_sample",f"{index}|{value:.2f}"));
                 if index<sample_count: time.sleep(.5)

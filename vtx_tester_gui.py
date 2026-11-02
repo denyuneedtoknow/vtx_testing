@@ -29,7 +29,8 @@ from vtx_power_table_measure import (
     DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES, POWER_TABLE_PLAN_FILENAMES, load_direct_frequency_sweep_plan,
     load_power_table_plan, measurement_points, measurement_power_levels,
 )
-from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, load_plan, power_status, switch_and_confirm, wait_for_stable_power
+from vtx_three_point_test import PLAN_DIRECTORY, VTX_PLAN_FILENAMES, confirm_actual_vtx_frequency, load_plan, power_status, switch_and_confirm, wait_for_stable_power
+from vtx_table import install_vtx_table, load_vtx_table
 
 
 ROOT = Path(__file__).resolve().parent
@@ -88,6 +89,8 @@ class VtxTesterGui:
         ttk.Spinbox(controls, from_=1, to=30, width=5, textvariable=self.samples).grid(row=0, column=5, sticky=W)
         self.sound_button = ttk.Button(controls, text="🔔", width=3, command=self._toggle_sound)
         self.sound_button.grid(row=0, column=6, sticky=W, padx=(16, 0))
+        self.table_button = ttk.Button(controls, text="Set table", command=self._set_table)
+        self.table_button.grid(row=0, column=7, sticky=W, padx=(10, 0))
 
         modes = ttk.Frame(controls)
         modes.grid(row=1, column=0, columnspan=6, sticky=W, pady=(10, 3))
@@ -209,14 +212,7 @@ class VtxTesterGui:
     def _sync_manual_frequencies(self) -> None:
         """Populate manual selection with real configured channels for this VTX."""
         try:
-            vtx = self.vtx.get()
-            if vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES:
-                plan = load_direct_frequency_sweep_plan(PLAN_DIRECTORY / DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[vtx])
-            elif vtx in POWER_TABLE_PLAN_FILENAMES:
-                plan = load_power_table_plan(PLAN_DIRECTORY / POWER_TABLE_PLAN_FILENAMES[vtx])
-            else:
-                plan = load_plan(PLAN_DIRECTORY / VTX_PLAN_FILENAMES[vtx])
-            profile = plan["_profile"]
+            profile = load_vtx_table(self.vtx.get())
             values = [
                 f"{band}{channel} · {frequency_mhz} MHz"
                 for band, frequencies in profile["bands"].items()
@@ -228,6 +224,31 @@ class VtxTesterGui:
         self.manual_frequency_box.configure(values=values)
         if values and self.frequency.get() not in values:
             self.frequency.set(values[0])
+
+    def _set_table(self) -> None:
+        if self.run_active:
+            return
+        vtx = self.vtx.get()
+        if not messagebox.askyesno("Replace VTX table", f"Replace the Flight Controller VTX table with the {vtx} table?\n\nThe FC must be disarmed. The VTX will be left at 25 mW.", parent=self.root):
+            return
+        try:
+            table = load_vtx_table(vtx)
+        except ValueError as exc:
+            messagebox.showerror("VTX table", str(exc), parent=self.root)
+            return
+        self.table_button.configure(state="disabled")
+        self.start_button.configure(state="disabled")
+        self.result_status.set("Writing the selected VTX table to the Flight Controller…")
+        threading.Thread(target=self._table_worker, args=(table,), daemon=True).start()
+
+    def _table_worker(self, table: dict[str, Any]) -> None:
+        try:
+            port = resolve_port(self.port.get().strip() or None, 115200, 2.0)
+            with open_serial(port, 115200, 2.0) as serial_port:
+                install_vtx_table(MspClient(serial_port, 2.0), table)
+            self.events.put(("table_done", str(table["model"])))
+        except Exception as exc:
+            self.events.put(("table_error", str(exc)))
 
     def _line(self, text: str) -> None:
         self.log.insert("", END, values=(text,))
@@ -313,10 +334,7 @@ class VtxTesterGui:
             self.output_path = LOG_DIRECTORY / f"gui-three-point-{vtx}-{timestamp}.csv"
             command = [*self._tool_command("VTX-Three-Point-Test", "vtx_three_point_test.py"), "--vtx", vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
         else:
-            # The operator selects the physical 5.8 GHz VTX.  Its complete
-            # power-table test intentionally covers all 176 factory points,
-            # using the direct-frequency sweep internally.
-            full_test_vtx = "5.8.all" if vtx == "5.8" else vtx
+            full_test_vtx = vtx
             self.output_path = LOG_DIRECTORY / f"gui-power-table-{vtx}-{timestamp}.csv"
             command = [*self._tool_command("VTX-Power-Table", "vtx_power_table_measure.py"), "--vtx", full_test_vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
             power_selection = POWER_SELECTIONS[self.full_power.get()]
@@ -359,7 +377,7 @@ class VtxTesterGui:
     def _prepare_full_progress(self) -> None:
         try:
             vtx = self.vtx.get()
-            full_test_vtx = "5.8.all" if vtx == "5.8" else vtx
+            full_test_vtx = vtx
             direct = full_test_vtx in DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES
             plan_path = PLAN_DIRECTORY / (DIRECT_FREQUENCY_SWEEP_PLAN_FILENAMES[full_test_vtx] if direct else POWER_TABLE_PLAN_FILENAMES[full_test_vtx])
             plan = load_direct_frequency_sweep_plan(plan_path) if direct else load_power_table_plan(plan_path)
@@ -451,10 +469,10 @@ class VtxTesterGui:
 
     def _switch_manual(self) -> None:
         try:
-            match = re.search(r"(\d+) MHz$", self.frequency.get())
+            match = re.fullmatch(r"(.)(\d+) · (\d+) MHz", self.frequency.get())
             if not match:
                 raise ValueError("Choose a frequency from the VTX channel list.")
-            frequency, power = int(match.group(1)), int(self.power.get())
+            band, channel, frequency, power = match.group(1), int(match.group(2)), int(match.group(3)), int(self.power.get())
             if power not in {25, 500, 2000, 2500, 3000, 4000, 5000}:
                 raise ValueError("Choose a power level offered for the selected VTX.")
             measurement_path = load_measurement_path(ROOT / "configs" / "measurement_path_control.json")
@@ -470,10 +488,10 @@ class VtxTesterGui:
         self.result_status.set("Switching VTX, waiting for stable output, then measuring samples.")
         self._draw_result_chart()
         self.start_button.configure(state="disabled")
-        self._line(f"Switching directly to {frequency} MHz / {power} mW…")
-        threading.Thread(target=self._manual_worker, args=(frequency, power, int(self.samples.get())), daemon=True).start()
+        self._line(f"Switching table channel {band}{channel} / {power} mW…")
+        threading.Thread(target=self._manual_worker, args=(band, channel, frequency, power, int(self.samples.get())), daemon=True).start()
 
-    def _manual_worker(self, frequency: int, power: int, sample_count: int) -> None:
+    def _manual_worker(self, band: str, channel: int, frequency: int, power: int, sample_count: int) -> None:
         sensor: NrpzSensor | None = None
         try:
             port = resolve_port(self.port.get().strip() or None, 115200, 2.0)
@@ -485,14 +503,17 @@ class VtxTesterGui:
                 matching = [int(level["index"]) for level in levels if int(level["value"]) == power]
                 if not matching:
                     raise MspError(f"Flight Controller VTX table has no {power} mW power level.")
-                updated = switch_and_confirm(client, current, band=1, channel=1, frequency_mhz=frequency, power_index=matching[0], settle_time_s=3.0, direct_frequency=True)
+                profile = load_vtx_table(self.vtx.get())
+                band_index = list(profile["bands"]).index(band) + 1
+                updated = switch_and_confirm(client, current, band=band_index, channel=channel, frequency_mhz=frequency, power_index=matching[0], settle_time_s=3.0, direct_frequency=False)
+                confirm_actual_vtx_frequency(client, frequency, timeout_s=3.0)
             self.events.put(("manual", "VTX active: " + format_vtx(updated)))
             measurement_path = load_measurement_path(ROOT / "configs" / "measurement_path_control.json")
             sensor = NrpzSensor()
             sensor.open("*")
             sensor.configure(frequency * 1_000_000, 16)
             sensor.set_level_offset(offset_db_at_frequency(measurement_path, frequency))
-            wait_for_stable_power(sensor, timeout_ms=5_000, sample_interval_s=.5, required_samples=3, tolerance_percent=2.0, max_wait_s=15.0)
+            wait_for_stable_power(sensor, timeout_ms=5_000, sample_interval_s=.5, required_samples=3, tolerance_percent=3.0, max_wait_s=15.0)
             readings: list[float] = []
             for index in range(1, sample_count + 1):
                 value = watts_to_millwatts(sensor.read_watts(5_000))
@@ -614,6 +635,18 @@ class VtxTesterGui:
                     self.result_status.set("Manual measurement completed. The VTX remains at the selected frequency and power.")
                     self.start_button.configure(state="normal")
                     self._play_completion_sound()
+                elif kind == "table_done":
+                    self.table_button.configure(state="normal")
+                    self.start_button.configure(state="normal")
+                    self._sync_manual_frequencies()
+                    self.result_status.set("VTX table installed and saved. The VTX is set to 25 mW.")
+                    self._line("Installed VTX table: " + value)
+                elif kind == "table_error":
+                    self.table_button.configure(state="normal")
+                    self.start_button.configure(state="normal")
+                    self.result_status.set("VTX table was not installed. See the technical log.")
+                    self._line("Error: " + value)
+                    messagebox.showerror("VTX table", value, parent=self.root)
                 elif kind == "error":
                     self._line("Error: " + value)
                     self.process = None

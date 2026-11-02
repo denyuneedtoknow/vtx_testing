@@ -22,12 +22,14 @@ from typing import Any, Callable
 from measurement_path import load_measurement_path, offset_db_at_frequency, validate_sensor_frequencies
 from vtx_a1_measure import build_set_vtx_config_payload, format_vtx
 from vtx_msp_probe import (
+    MSP2_GET_VTX_DEVICE_STATUS,
     MSP_SET_VTX_CONFIG,
     MSP_VTX_CONFIG,
     MspClient,
     MspError,
     open_serial,
     parse_vtx_config,
+    parse_vtx_device_status,
     read_vtx_bands,
     read_vtx_power_levels,
     resolve_port,
@@ -173,9 +175,93 @@ def switch_and_confirm(
     updated = parse_vtx_config(client.request(MSP_VTX_CONFIG))
     expected = (0, 0, frequency_mhz, power_index) if direct_frequency else (band, channel, frequency_mhz, power_index)
     actual = (updated["band"], updated["channel"], updated["frequency_mhz"], updated["power_index"])
-    if actual != expected or not updated["ready"]:
-        raise MspError(f"VTX did not confirm requested settings. Expected {expected}; got {actual}; ready={updated['ready']}.")
+    if actual != expected:
+        raise MspError(f"Flight Controller did not store the requested VTX settings. Expected {expected}; got {actual}.")
     return updated
+
+
+def read_actual_vtx_status(client: MspClient) -> dict[str, int | bool]:
+    """Read live state from the physical VTX through Betaflight's VTX driver."""
+    try:
+        payload = client.request_v2(MSP2_GET_VTX_DEVICE_STATUS)
+    except (AttributeError, MspError) as exc:
+        raise MspError(
+            "Cannot verify the physical VTX state. The Flight Controller must support "
+            "MSP2_GET_VTX_DEVICE_STATUS; testing is blocked to prevent measurements on "
+            "an unconfirmed frequency."
+        ) from exc
+    status = parse_vtx_device_status(payload)
+    if status["device_type"] != 4:
+        raise MspError(
+            f"Expected an IRC Tramp VTX, but Betaflight reports device type {status['device_type']}. "
+            "Testing is blocked."
+        )
+    if not status["ready"] or not status["frequency_available"]:
+        raise MspError("The physical IRC Tramp VTX is not ready or did not report its frequency.")
+    return status
+
+
+def confirm_actual_vtx_frequency(client: MspClient, expected_frequency_mhz: int, *, timeout_s: float = 3.0) -> dict[str, int | bool]:
+    """Wait until the physical IRC Tramp VTX reports the requested frequency."""
+    deadline = time.monotonic() + timeout_s
+    last_status: dict[str, int | bool] | None = None
+    while True:
+        last_status = read_actual_vtx_status(client)
+        if last_status["frequency_mhz"] == expected_frequency_mhz:
+            return last_status
+        if time.monotonic() >= deadline:
+            raise MspError(
+                "Physical VTX frequency does not match the selected table: "
+                f"requested {expected_frequency_mhz} MHz, but the VTX reports "
+                f"{last_status['frequency_mhz']} MHz. Check that the selected VTX model "
+                "matches the connected transmitter. No measurement was taken."
+            )
+        time.sleep(0.2)
+
+
+def verify_selected_vtx_identity(
+    client: MspClient,
+    current: dict[str, int | bool | None],
+    profile: dict[str, Any],
+    *,
+    safe_power_index: int,
+    settle_time_s: float,
+) -> dict[str, int | bool | None]:
+    """Probe a model-specific frequency at 25 mW before allowing a test."""
+    probe = profile.get("identity_probe")
+    if not isinstance(probe, dict):
+        return current
+    band_letter = probe.get("band")
+    channel = probe.get("channel")
+    frequency_mhz = probe.get("frequency_mhz")
+    bands = profile.get("bands")
+    if (
+        not isinstance(bands, dict) or not isinstance(band_letter, str)
+        or band_letter not in bands or not isinstance(channel, int)
+        or not 1 <= channel <= len(bands[band_letter])
+        or not isinstance(frequency_mhz, int)
+        or bands[band_letter][channel - 1] != frequency_mhz
+    ):
+        raise ValueError("VTX profile contains an invalid identity_probe.")
+    band = list(bands).index(band_letter) + 1
+    try:
+        updated = switch_and_confirm(
+            client,
+            current,
+            band=band,
+            channel=channel,
+            frequency_mhz=frequency_mhz,
+            power_index=safe_power_index,
+            settle_time_s=settle_time_s,
+            direct_frequency=False,
+        )
+        confirm_actual_vtx_frequency(client, frequency_mhz, timeout_s=max(2.0, settle_time_s))
+        return updated
+    except MspError as exc:
+        raise MspError(
+            f"Physical VTX could not be confirmed for the selected profile {profile.get('model', '')!r}. "
+            f"The safe identity check at {frequency_mhz} MHz failed: {exc} Testing is blocked."
+        ) from exc
 
 
 def verify_vtx_table(
@@ -528,7 +614,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, help="Exact readings to collect at each point; overrides the plan observation duration.")
     parser.add_argument("--timeout-ms", type=int, default=5_000, help="NRP-Z11 measurement timeout in ms (default: 5000).")
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a point is considered stable (default: 3).")
-    parser.add_argument("--stability-tolerance-percent", type=float, default=2.0, help="Maximum peak-to-peak spread for stable readings (default: 2).")
+    parser.add_argument("--stability-tolerance-percent", type=float, default=3.0, help="Maximum peak-to-peak spread for stable readings (default: 3).")
     parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
     parser.add_argument("--resource", default="*", help="NRP-Z11 VISA resource, or * for the first sensor.")
     parser.add_argument("--dll", help="Path to rsnrpz_64.dll.")
@@ -578,9 +664,9 @@ def main() -> int:
         test_power = plan["test_power"]
         safe_power = plan["safe_power_after_test"]
         thresholds_percent = plan["_reference_thresholds_percent"]
-        # All bundled plans use direct IRC Tramp frequency control. The FC
-        # table is retained only as a shared list of power levels.
-        direct_frequency = bool(plan.get("direct_frequency", True))
+        # Tests switch through the selected FC VTX table. Direct-frequency
+        # mode remains available only for an explicitly marked legacy plan.
+        direct_frequency = bool(plan.get("direct_frequency", False))
         use_color = not args.no_color and sys.stdout.isatty()
         print(f"Plan: {plan['name']}")
         print("Path correction: fixed attenuator minus frequency-dependent path loss.")
@@ -613,6 +699,16 @@ def main() -> int:
                 test_power_index = int(test_power["index"])
                 safe_power_index = int(safe_power["index"])
 
+            print("Verifying the physical VTX model at 25 mW...")
+            current = verify_selected_vtx_identity(
+                client,
+                current,
+                profile,
+                safe_power_index=safe_power_index,
+                settle_time_s=settle_time_s,
+            )
+            print("Physical VTX frequency confirmed through IRC Tramp.")
+
             try:
                 if args.manual:
                     csv_path = args.csv or Path("logs") / f"vtx-manual-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.csv"
@@ -640,6 +736,9 @@ def main() -> int:
                             power_index=test_power_index,
                             settle_time_s=settle_time_s,
                             direct_frequency=direct_frequency,
+                        )
+                        confirm_actual_vtx_frequency(
+                            client, point["frequency_mhz"], timeout_s=max(2.0, settle_time_s)
                         )
                         print(f"Active VTX: {format_vtx(current)}")
                         level_offset_db = offset_db_at_frequency(measurement_path, point["frequency_mhz"])

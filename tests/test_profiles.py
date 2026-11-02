@@ -63,14 +63,14 @@ class VtxProfileTests(unittest.TestCase):
             loaded_plan = load_plan(path)
             self.assertTrue(all(point["reference_output_mw"] > 0 for point in loaded_plan["points"]))
 
-    def test_5_8_plan_uses_factory_channels(self):
+    def test_5_8_plan_uses_the_installed_64_channel_table(self):
         plan = load_plan(ROOT / "configs/test_plans" / "ft_vtx_5_8_three_point_4w.json")
         self.assertEqual(
             [(point["band"], point["channel"], point["frequency_mhz"]) for point in plan["points"]],
             [("M", 2, 5695), ("E", 7, 6870), ("G", 8, 7210)],
         )
         self.assertEqual([point["reference_output_mw"] for point in plan["points"]], [4000, 4000, 4000])
-        self.assertEqual(set(plan["_profile"]["bands"]), set("ABCDEFGHIJKLMNOPQRSTUV"))
+        self.assertEqual(list(plan["_profile"]["bands"]), ["M", "A", "B", "C", "D", "E", "F", "G"])
         self.assertEqual(plan["test_power"], {"index": 4, "nominal_mw": 4000})
 
     def test_legacy_5_8_plan_uses_its_original_64_channel_table(self):
