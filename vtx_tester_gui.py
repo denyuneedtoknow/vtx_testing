@@ -62,6 +62,7 @@ class VtxTesterGui:
         self.samples = StringVar(value="3")
         self.full_power = StringVar(value="All")
         self.full_settle_time = StringVar(value="3")
+        self.preheat_seconds = StringVar(value="5")
         self.sound_enabled = BooleanVar(value=True)
         self.frequency = StringVar(value="5945")
         self.power = StringVar(value="4000")
@@ -72,7 +73,13 @@ class VtxTesterGui:
         self.full_progress: dict[str, int] | None = None
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.bind_all("<space>", self._start_from_space)
         self.root.after(80, self._drain_events)
+
+    def _start_from_space(self, _event=None):
+        """Use Space as the same shortcut as Start test while a run is idle."""
+        self.start()
+        return "break"
 
     def _build(self) -> None:
         main = ttk.Frame(self.root, padding=12)
@@ -118,6 +125,8 @@ class VtxTesterGui:
         self.start_button.grid(row=3, column=0, sticky=W, pady=(10, 0))
         self.stop_button = ttk.Button(controls, text="Stop", state="disabled", command=self.stop)
         self.stop_button.grid(row=3, column=1, sticky=W, pady=(10, 0), padx=(8, 0))
+        ttk.Label(controls, text="Preheat, s").grid(row=3, column=2, sticky=W, pady=(10, 0), padx=(16, 5))
+        ttk.Spinbox(controls, from_=0, to=120, increment=1, width=5, textvariable=self.preheat_seconds).grid(row=3, column=3, sticky=W, pady=(10, 0))
 
         tabs = ttk.Notebook(main)
         tabs.pack(fill=BOTH, expand=True, pady=(12, 0))
@@ -332,13 +341,13 @@ class VtxTesterGui:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         if mode == "three":
             self.output_path = LOG_DIRECTORY / f"gui-three-point-{vtx}-{timestamp}.csv"
-            command = [*self._tool_command("VTX-Three-Point-Test", "vtx_three_point_test.py"), "--vtx", vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
+            command = [*self._tool_command("VTX-Three-Point-Test", "vtx_three_point_test.py"), "--vtx", vtx, "--samples", self.samples.get(), "--csv", str(self.output_path), "--preheat-seconds", self.preheat_seconds.get()]
         else:
             full_test_vtx = vtx
             self.output_path = LOG_DIRECTORY / f"gui-power-table-{vtx}-{timestamp}.csv"
             command = [*self._tool_command("VTX-Power-Table", "vtx_power_table_measure.py"), "--vtx", full_test_vtx, "--samples", self.samples.get(), "--csv", str(self.output_path)]
             power_selection = POWER_SELECTIONS[self.full_power.get()]
-            command.extend(["--power", power_selection, "--settle-time", self.full_settle_time.get()])
+            command.extend(["--power", power_selection, "--settle-time", self.full_settle_time.get(), "--preheat-seconds", self.preheat_seconds.get()])
         if self.port.get().strip():
             command.extend(["--port", self.port.get().strip()])
         return command

@@ -22,9 +22,9 @@ from pathlib import Path
 from statistics import fmean
 
 from PySide6.QtCore import Qt, QSettings, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QIntValidator, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QComboBox, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSpinBox, QStackedWidget, QTabWidget,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QStackedWidget, QTabWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QSizePolicy, QScrollArea)
 
 from measurement_path import load_measurement_path, offset_db_at_frequency, validate_sensor_frequencies
@@ -100,13 +100,43 @@ class StatusTabs(QTabWidget):
             self.status_widget.raise_()
 
 
+class CompactNumberInput(QFrame):
+    """Numeric text field with compact, predictable Windows +/− buttons."""
+    def __init__(self, value: int, maximum: int, tooltip: str) -> None:
+        super().__init__(); self.minimum = 0; self.maximum = maximum; self.setObjectName("numberStepper"); self.setFixedSize(70, 32); self.setToolTip(tooltip)
+        layout = QGridLayout(self); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(0)
+        self.editor = QLineEdit(str(value)); self.editor.setObjectName("stepValue"); self.editor.setValidator(QIntValidator(self.minimum, maximum, self.editor)); self.editor.setAlignment(Qt.AlignCenter); self.editor.setFixedSize(50, 32); self.editor.setToolTip(tooltip); self.editor.editingFinished.connect(self._normalize)
+        increment = QPushButton("+"); increment.setObjectName("stepUp"); increment.setFixedSize(20, 16); increment.setToolTip("Increase")
+        decrement = QPushButton("−"); decrement.setObjectName("stepDown"); decrement.setFixedSize(20, 16); decrement.setToolTip("Decrease")
+        increment.clicked.connect(lambda: self.setValue(self.value() + 1)); decrement.clicked.connect(lambda: self.setValue(self.value() - 1))
+        layout.addWidget(self.editor, 0, 0, 2, 1); layout.addWidget(increment, 0, 1); layout.addWidget(decrement, 1, 1)
+
+    def value(self) -> int:
+        try:
+            value = int(self.editor.text())
+        except ValueError:
+            value = self.minimum
+        return max(self.minimum, min(self.maximum, value))
+
+    def setValue(self, value: int) -> None:
+        self.editor.setText(str(max(self.minimum, min(self.maximum, value))))
+
+    def _normalize(self) -> None:
+        self.setValue(self.value())
+
+
 class VtxTesterQt(QMainWindow):
     def __init__(self) -> None:
         super().__init__(); self.settings = QSettings("Foxeer", "VTXTester"); self.theme = self.settings.value("theme", "light")
         self.palette = PALETTES[self.theme if self.theme in PALETTES else "light"]; self.process = None; self.run_active = self.stop_requested = self.safety_reset_in_progress = self.safety_reset_confirmed = self.run_failed = False
         self.events: queue.Queue[tuple[str, str]] = queue.Queue(); self.output_path: Path | None = None; self.current_frequency = None; self.results: list[dict] = []; self.full_progress: tuple[int, int, int] | None = None
         self.result_message = "Run a three-point test or open its CSV to see reference comparison."; self._build(); self._apply_theme()
+        self.start_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self); self.start_shortcut.setContext(Qt.ApplicationShortcut); self.start_shortcut.activated.connect(self.start)
         self.timer = QTimer(self); self.timer.timeout.connect(self._drain_events); self.timer.start(80)
+
+    @staticmethod
+    def _number_stepper(value: int, *, maximum: int = 120, tooltip: str = "") -> CompactNumberInput:
+        return CompactNumberInput(value, maximum, tooltip)
 
     def _build(self) -> None:
         self.setWindowTitle("VTX Tester"); self.resize(1120, 720); self.setMinimumSize(980, 650)
@@ -117,21 +147,21 @@ class VtxTesterQt(QMainWindow):
         self.set_table_button = QPushButton("Set table"); self.set_table_button.clicked.connect(self._set_table); grid.addWidget(self.set_table_button, 0, 2)
         com_label = QLabel("COM port (optional)"); com_label.setMinimumWidth(142); grid.addWidget(com_label, 0, 3); self.port = QLineEdit(); self.port.setFixedWidth(84); self.port.setMaxLength(8); self.port.setPlaceholderText("COM83"); grid.addWidget(self.port, 0, 4)
         readings_label = QLabel("Output readings per point/cell"); readings_label.setMinimumWidth(230); grid.addWidget(readings_label, 0, 5); self.samples = QComboBox(); self.samples.setFixedWidth(78); self.samples.addItems([str(value) for value in range(1, 31)]); self.samples.setCurrentText("3"); grid.addWidget(self.samples, 0, 6)
-        self.sound = QPushButton("🔔︎"); self.sound.setObjectName("soundButton"); self.sound.setFixedWidth(44); self.sound.setCheckable(True); self.sound.setChecked(True); self.sound.clicked.connect(lambda: self.sound.setText("🔔︎" if self.sound.isChecked() else "🔕︎")); grid.addWidget(self.sound, 0, 8); grid.setColumnStretch(7, 1)
+        preheat_label = QLabel("Preheat, s"); preheat_label.setMinimumWidth(72); grid.addWidget(preheat_label, 0, 7); self.preheat = self._number_stepper(5, tooltip="Seconds to run the first frequency at maximum power before measuring. Set 0 to disable."); grid.addWidget(self.preheat, 0, 8); self.sound = QPushButton("🔔︎"); self.sound.setObjectName("soundButton"); self.sound.setFixedWidth(44); self.sound.setCheckable(True); self.sound.setChecked(True); self.sound.clicked.connect(lambda: self.sound.setText("🔔︎" if self.sound.isChecked() else "🔕︎")); grid.addWidget(self.sound, 0, 10); grid.setColumnStretch(9, 1)
         self.mode_group = QButtonGroup(self); modes = QHBoxLayout(); self.mode_buttons = {}
         for key, text in (("three", "Three-point test"), ("full", "Full power table"), ("manual", "Manual frequency switch")):
             button = QPushButton(text); button.setCheckable(True); button.setFixedHeight(38); button.setObjectName("modeCard"); button.clicked.connect(lambda checked, value=key: self._set_mode(value)); self.mode_group.addButton(button); self.mode_buttons[key] = button; modes.addWidget(button)
-        self.mode_buttons["three"].setChecked(True); modes.addStretch(); grid.addLayout(modes, 1, 0, 1, 9)
-        self.option_stack = QStackedWidget(); self.option_stack.setStyleSheet("QStackedWidget { background: transparent; }"); blank = QWidget(); self.full_options = QWidget(); self.full_options.setObjectName("fullOptions"); self.full_options.setStyleSheet("QWidget#fullOptions { background: transparent; }"); f = QHBoxLayout(self.full_options); f.setContentsMargins(0,0,0,0); f.addWidget(QLabel("Measure power")); self.full_power = QComboBox(); self.full_power.setFixedWidth(118); f.addWidget(self.full_power); f.addWidget(QLabel("Stabilization delay, s")); self.settle = QSpinBox(); self.settle.setFixedWidth(92); self.settle.setRange(0,120); self.settle.setValue(3); f.addWidget(self.settle); f.addStretch()
-        self.manual_options = QWidget(); self.manual_options.setObjectName("manualOptions"); self.manual_options.setStyleSheet("QWidget#manualOptions { background: transparent; }"); m = QHBoxLayout(self.manual_options); m.setContentsMargins(0,0,0,0); m.addWidget(QLabel("Frequency, MHz")); self.frequency = QComboBox(); self.frequency.setMinimumWidth(220); m.addWidget(self.frequency); m.addWidget(QLabel("Power, mW")); self.power = QComboBox(); self.power.setFixedWidth(100); m.addWidget(self.power); m.addStretch(); self.option_stack.addWidget(blank); self.option_stack.addWidget(self.full_options); self.option_stack.addWidget(self.manual_options); self.option_stack.setMaximumHeight(0); grid.addWidget(self.option_stack, 2, 0, 1, 9)
+        self.mode_buttons["three"].setChecked(True); modes.addStretch(); grid.addLayout(modes, 1, 0, 1, 11)
+        self.option_stack = QStackedWidget(); self.option_stack.setStyleSheet("QStackedWidget { background: transparent; }"); blank = QWidget(); self.full_options = QWidget(); self.full_options.setObjectName("fullOptions"); self.full_options.setStyleSheet("QWidget#fullOptions { background: transparent; }"); f = QHBoxLayout(self.full_options); f.setContentsMargins(0,0,0,0); f.addWidget(QLabel("Measure power")); self.full_power = QComboBox(); self.full_power.setFixedWidth(118); f.addWidget(self.full_power); f.addWidget(QLabel("Stabilization delay, s")); self.settle = self._number_stepper(3, tooltip="Seconds to wait after each VTX switch."); f.addWidget(self.settle); f.addStretch()
+        self.manual_options = QWidget(); self.manual_options.setObjectName("manualOptions"); self.manual_options.setStyleSheet("QWidget#manualOptions { background: transparent; }"); m = QHBoxLayout(self.manual_options); m.setContentsMargins(0,0,0,0); m.addWidget(QLabel("Frequency, MHz")); self.frequency = QComboBox(); self.frequency.setMinimumWidth(220); m.addWidget(self.frequency); m.addWidget(QLabel("Power, mW")); self.power = QComboBox(); self.power.setFixedWidth(100); m.addWidget(self.power); m.addStretch(); self.option_stack.addWidget(blank); self.option_stack.addWidget(self.full_options); self.option_stack.addWidget(self.manual_options); self.option_stack.setMaximumHeight(0); grid.addWidget(self.option_stack, 2, 0, 1, 11)
         self.status = QLabel(); self.status.setObjectName("status"); self.status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter); self.status.setContentsMargins(10, 3, 10, 3)
         action_row = QWidget(); action_row.setObjectName("actionRow"); action_row.setStyleSheet("QWidget#actionRow { background: transparent; }"); action_grid = QGridLayout(action_row); action_grid.setContentsMargins(0, 0, 0, 0); action_grid.setColumnStretch(0, 1); action_grid.setColumnStretch(1, 1); action_grid.setColumnStretch(2, 1)
-        actions = QWidget(); actions.setObjectName("actionButtons"); actions.setStyleSheet("QWidget#actionButtons { background: transparent; }"); actions_layout = QHBoxLayout(actions); actions_layout.setContentsMargins(0, 0, 0, 0); self.start_button = QPushButton("Start test"); self.start_button.setFixedHeight(36); self.start_button.setObjectName("primary"); self.start_button.clicked.connect(self.start); self.stop_button = QPushButton("Stop"); self.stop_button.setFixedHeight(36); self.stop_button.setEnabled(False); self.stop_button.clicked.connect(self.stop); actions_layout.addWidget(self.start_button); actions_layout.addWidget(self.stop_button); action_grid.addWidget(actions, 0, 0, alignment=Qt.AlignLeft); action_grid.addWidget(self.status, 0, 1, alignment=Qt.AlignHCenter); grid.addWidget(action_row,3,0,1,9); layout.addWidget(panel)
+        actions = QWidget(); actions.setObjectName("actionButtons"); actions.setStyleSheet("QWidget#actionButtons { background: transparent; }"); actions_layout = QHBoxLayout(actions); actions_layout.setContentsMargins(0, 0, 0, 0); self.start_button = QPushButton("Start test"); self.start_button.setFixedHeight(36); self.start_button.setObjectName("primary"); self.start_button.clicked.connect(self.start); self.stop_button = QPushButton("Stop"); self.stop_button.setFixedHeight(36); self.stop_button.setEnabled(False); self.stop_button.clicked.connect(self.stop); actions_layout.addWidget(self.start_button); actions_layout.addWidget(self.stop_button); action_grid.addWidget(actions, 0, 0, alignment=Qt.AlignLeft); action_grid.addWidget(self.status, 0, 1, alignment=Qt.AlignHCenter); grid.addWidget(action_row,3,0,1,11); layout.addWidget(panel)
         tabs = QTabWidget(); result = QWidget(); rv = QVBoxLayout(result); rv.setContentsMargins(12, 12, 12, 12); rv.setSpacing(8); self.steps = QTableWidget(0,2); self.steps.setHorizontalHeaderLabels(["Step","Result"]); self.steps.verticalHeader().setVisible(False); self.steps.verticalHeader().setDefaultSectionSize(20); self.steps.horizontalHeader().setFixedHeight(24); self.steps.horizontalHeader().setStretchLastSection(True); self.steps.setMinimumHeight(145); self.steps.setMaximumHeight(185); rv.addWidget(self.steps); self.chart = ComparisonChart(self); rv.addWidget(self.chart, 1); tabs.addTab(result,"Result summary")
         log = QWidget(); lv = QVBoxLayout(log); self.log = QTableWidget(0,1); self.log.setHorizontalHeaderLabels(["Output"]); self.log.horizontalHeader().setStretchLastSection(True); lv.addWidget(self.log); tabs.addTab(log,"Live test log"); layout.addWidget(tabs,1); self._set_status("Ready. Choose a test and press Start test."); self._sync_mode()
 
     def _apply_theme(self) -> None:
-        p = self.palette; self.theme_button.setText(("☾  Dark" if self.theme == "dark" else "☀  Light")); self.setStyleSheet(f"""QWidget{{background:{p['bg']};color:{p['text']};font:14px 'Segoe UI';}} QLabel{{background:transparent;}} #title{{font-size:22px;font-weight:700;}} #panel,QTabWidget::pane{{background:{p['surface']};border:1px solid {p['border']};border-radius:12px;}} QPushButton,QLineEdit,QComboBox,QSpinBox{{min-height:32px;border:1px solid {p['border']};border-radius:9px;background:{p['surface']};padding:0 10px;}} QPushButton:hover{{border-color:{p['primary']};}} #themeToggle,#primary{{min-height:32px;max-height:32px;}} #primary{{background:{p['primary']};color:white;font-weight:700;}} #primary:hover{{background:#2563EB;}} #primary:pressed{{background:#1D4ED8;}} #primary:disabled{{background:{p['pending']};border-color:{p['border']};color:{p['surface']};}} #modeCard{{min-height:36px;max-height:36px;background:{p['surface']};text-align:left;padding-left:14px;}} #modeCard:checked{{background:{p['alt']};border:2px solid {p['primary']};}} QSpinBox::up-button,QSpinBox::down-button{{width:22px;border-left:1px solid {p['border']};background:{p['alt']};}} QSpinBox::up-arrow{{border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:7px solid {p['text']};}} QSpinBox::down-arrow{{border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid {p['text']};}} QTabBar::tab{{padding:8px 16px;background:{p['alt']};border:1px solid {p['border']};}} QTabBar::tab:selected{{color:{p['primary']};background:{p['surface']};}} QTableWidget{{background:{p['surface']};border:1px solid {p['border']};gridline-color:{p['border']};}} QHeaderView::section{{background:{p['alt']};padding:8px;border:0;}} #status{{padding:6px 12px;border-radius:8px;}}"""); self.chart.update(); self._set_status(self.status.text())
+        p = self.palette; self.theme_button.setText(("☾  Dark" if self.theme == "dark" else "☀  Light")); self.setStyleSheet(f"""QWidget{{background:{p['bg']};color:{p['text']};font:14px 'Segoe UI';}} QLabel{{background:transparent;}} #title{{font-size:22px;font-weight:700;}} #panel,QTabWidget::pane{{background:{p['surface']};border:1px solid {p['border']};border-radius:12px;}} QPushButton,QLineEdit,QComboBox{{min-height:32px;border:1px solid {p['border']};border-radius:9px;background:{p['surface']};padding:0 10px;}} QPushButton:hover{{border-color:{p['primary']};}} #numberStepper{{background:transparent;}} #stepValue{{min-height:30px;max-height:30px;color:{p['text']};background:{p['surface']};border-top-right-radius:0;border-bottom-right-radius:0;padding:0;}} #stepUp,#stepDown{{min-width:20px;max-width:20px;min-height:16px;max-height:16px;padding:0;border-radius:0;font-size:12px;font-weight:700;}} #stepUp{{border-top-right-radius:8px;border-bottom:0;}} #stepDown{{border-bottom-right-radius:8px;}} #themeToggle,#primary{{min-height:32px;max-height:32px;}} #primary{{background:{p['primary']};color:white;font-weight:700;}} #primary:hover{{background:#2563EB;}} #primary:pressed{{background:#1D4ED8;}} #primary:disabled{{background:{p['pending']};border-color:{p['border']};color:{p['surface']};}} #modeCard{{min-height:36px;max-height:36px;background:{p['surface']};text-align:left;padding-left:14px;}} #modeCard:checked{{background:{p['alt']};border:2px solid {p['primary']};}} QTabBar::tab{{padding:8px 16px;background:{p['alt']};border:1px solid {p['border']};}} QTabBar::tab:selected{{color:{p['primary']};background:{p['surface']};}} QTableWidget{{background:{p['surface']};border:1px solid {p['border']};gridline-color:{p['border']};}} QHeaderView::section{{background:{p['alt']};padding:8px;border:0;}} #status{{padding:6px 12px;border-radius:8px;}}"""); self.chart.update(); self._set_status(self.status.text())
 
     def _toggle_theme(self) -> None: self.theme = "dark" if self.theme == "light" else "light"; self.palette = PALETTES[self.theme]; self.settings.setValue("theme", self.theme); self._apply_theme()
     def _play_completion_sound(self) -> None:
@@ -159,8 +189,8 @@ class VtxTesterQt(QMainWindow):
         target=Path(sys.executable).resolve().parent.parent/executable/f"{executable}{'.exe' if sys.platform=='win32' else ''}"; return [str(target)] if target.is_file() else (_ for _ in ()).throw(ValueError(f"Packaged tool was not found: {target}"))
     def _command(self) -> list[str]:
         vtx, mode, stamp=self.vtx.currentText(),self._mode(),datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        if mode=="three": self.output_path=LOG_DIRECTORY/f"gui-three-point-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Three-Point-Test","vtx_three_point_test.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path)]
-        else: self.output_path=LOG_DIRECTORY/f"gui-power-table-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Power-Table","vtx_power_table_measure.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path),"--power",POWER_SELECTIONS[self.full_power.currentText()],"--settle-time",str(self.settle.value())]
+        if mode=="three": self.output_path=LOG_DIRECTORY/f"gui-three-point-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Three-Point-Test","vtx_three_point_test.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path),"--preheat-seconds",str(self.preheat.value())]
+        else: self.output_path=LOG_DIRECTORY/f"gui-power-table-{vtx}-{stamp}.csv"; command=[*self._tool_command("VTX-Power-Table","vtx_power_table_measure.py"),"--vtx",vtx,"--samples",self.samples.currentText(),"--csv",str(self.output_path),"--power",POWER_SELECTIONS[self.full_power.currentText()],"--settle-time",str(self.settle.value()),"--preheat-seconds",str(self.preheat.value())]
         if self.port.text().strip(): command.extend(["--port",self.port.text().strip()])
         return command
     def start(self) -> None:

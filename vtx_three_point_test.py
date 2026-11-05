@@ -180,6 +180,44 @@ def switch_and_confirm(
     return updated
 
 
+def preheat_vtx(
+    client: MspClient,
+    current: dict[str, int | bool | None],
+    point: dict[str, Any],
+    bands: dict[str, list[int]],
+    *,
+    power_index: int,
+    power_mw: int,
+    duration_s: float,
+    direct_frequency: bool,
+) -> dict[str, int | bool | None]:
+    """Run the transmitter at the first test point before measurements begin."""
+    if duration_s <= 0:
+        return current
+    band = list(bands).index(point["band"]) + 1
+    frequency_mhz = int(point["frequency_mhz"])
+    print(
+        f"Preheating VTX: {point['band']}{point['channel']} ({frequency_mhz} MHz) "
+        f"at {power_mw} mW for {duration_s:g} s..."
+    )
+    updated = switch_and_confirm(
+        client,
+        current,
+        band=band,
+        channel=int(point["channel"]),
+        frequency_mhz=frequency_mhz,
+        power_index=power_index,
+        # The requested preheat time starts immediately after the command is
+        # accepted by the FC. Normal settle time is still applied when the
+        # first actual measurement point is selected below.
+        settle_time_s=0,
+        direct_frequency=direct_frequency,
+    )
+    time.sleep(duration_s)
+    print("Preheat complete. Starting measurements.")
+    return updated
+
+
 def read_actual_vtx_status(client: MspClient) -> dict[str, int | bool]:
     """Read live state from the physical VTX through Betaflight's VTX driver."""
     try:
@@ -616,6 +654,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a point is considered stable (default: 3).")
     parser.add_argument("--stability-tolerance-percent", type=float, default=3.0, help="Maximum peak-to-peak spread for stable readings (default: 3).")
     parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
+    parser.add_argument("--preheat-seconds", type=float, default=5.0, help="Seconds to preheat the first test frequency at maximum power before measurements (default: 5). Set 0 to disable.")
     parser.add_argument("--resource", default="*", help="NRP-Z11 VISA resource, or * for the first sensor.")
     parser.add_argument("--dll", help="Path to rsnrpz_64.dll.")
     parser.add_argument("--csv", type=Path, help="Write all samples to this CSV file. Default: logs/<timestamp>.csv.")
@@ -627,8 +666,9 @@ def parse_args() -> argparse.Namespace:
     )
     args = parser.parse_args()
     if (args.baud <= 0 or args.timeout <= 0 or args.averages <= 0 or args.timeout_ms <= 0 or (args.samples is not None and args.samples <= 0)
-            or args.stability_samples < 2 or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0):
-        parser.error("baud, timeout, averages, timeout-ms, stability-samples, stability-tolerance-percent and stability-timeout-s must be positive; stability-samples must be at least 2.")
+            or args.stability_samples < 2 or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0
+            or args.preheat_seconds < 0):
+        parser.error("baud, timeout, averages, timeout-ms, stability-samples, stability-tolerance-percent and stability-timeout-s must be positive; preheat-seconds cannot be negative; stability-samples must be at least 2.")
     return args
 
 
@@ -663,6 +703,7 @@ def main() -> int:
             raise ValueError("settle_time_s cannot be negative; observation_time_s and sample_interval_s must be positive.")
         test_power = plan["test_power"]
         safe_power = plan["safe_power_after_test"]
+        preheat_power_mw = max(int(value) for value in profile["power_levels_mw"])
         thresholds_percent = plan["_reference_thresholds_percent"]
         # Tests switch through the selected FC VTX table. Direct-frequency
         # mode remains available only for an explicitly marked legacy plan.
@@ -679,10 +720,11 @@ def main() -> int:
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
             if direct_frequency:
-                required_power_values = [int(safe_power["nominal_mw"]), int(test_power["nominal_mw"])]
+                required_power_values = [int(safe_power["nominal_mw"]), int(test_power["nominal_mw"]), preheat_power_mw]
                 power_indexes = resolve_power_indexes(client, current, required_power_values)
                 test_power_index = power_indexes[int(test_power["nominal_mw"])]
                 safe_power_index = power_indexes[int(safe_power["nominal_mw"])]
+                preheat_power_index = power_indexes[preheat_power_mw]
                 print("Verifying required FC power levels (read-only; frequencies are sent directly)...")
                 print(
                     "Required power levels found. FC frequency table is not used or changed: "
@@ -698,6 +740,7 @@ def main() -> int:
                 )
                 test_power_index = int(test_power["index"])
                 safe_power_index = int(safe_power["index"])
+                preheat_power_index = profile["power_levels_mw"].index(preheat_power_mw) + 1
 
             print("Verifying the physical VTX model at 25 mW...")
             current = verify_selected_vtx_identity(
@@ -710,6 +753,13 @@ def main() -> int:
             print("Physical VTX frequency confirmed through IRC Tramp.")
 
             try:
+                if not args.manual:
+                    current = preheat_vtx(
+                        client, current, plan["points"][0], profile["bands"],
+                        power_index=preheat_power_index, power_mw=preheat_power_mw,
+                        duration_s=args.preheat_seconds,
+                        direct_frequency=direct_frequency,
+                    )
                 if args.manual:
                     csv_path = args.csv or Path("logs") / f"vtx-manual-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.csv"
                     csv_file, csv_writer = create_csv_writer(csv_path)

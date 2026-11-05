@@ -27,6 +27,7 @@ from vtx_three_point_test import (
     PLAN_DIRECTORY,
     VTX_PLAN_FILENAMES,
     install_soft_interrupt_handler,
+    preheat_vtx,
     resolve_power_indexes,
     switch_and_confirm,
     verify_selected_vtx_identity,
@@ -202,6 +203,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stability-samples", type=int, default=3, help="Consecutive readings required before a cell is measured (default: 3).")
     parser.add_argument("--stability-tolerance-percent", type=float, default=3.0, help="Maximum peak-to-peak spread for stable readings (default: 3).")
     parser.add_argument("--stability-timeout-s", type=float, default=15.0, help="Maximum time to wait for output stabilization (default: 15).")
+    parser.add_argument("--preheat-seconds", type=float, default=5.0, help="Seconds to preheat the first test frequency at maximum power before measurements (default: 5). Set 0 to disable.")
     parser.add_argument("--trend-samples", type=int, default=10, help="Readings used to observe post-settle output trend (default: 10).")
     parser.add_argument("--trend-threshold-percent", type=float, default=2.0, help="Absolute first-to-last change classified as rising/falling (default: 2).")
     parser.add_argument("--sample-interval", type=float, default=0.5, help="Seconds between readings in a cell (default: 0.5).")
@@ -214,8 +216,8 @@ def parse_args() -> argparse.Namespace:
     if (args.baud <= 0 or args.timeout <= 0 or args.samples <= 0 or args.warmup_readings < 0 or args.sample_interval < 0
             or args.averages <= 0 or args.timeout_ms <= 0 or args.stability_samples < 2
             or args.stability_tolerance_percent <= 0 or args.stability_timeout_s <= 0 or args.trend_samples < 2
-            or args.trend_threshold_percent <= 0):
-        parser.error("baud, timeout, samples, averages, timeout-ms, stability-tolerance-percent and stability-timeout-s must be positive; stability-samples must be at least 2; warmup-readings and sample-interval cannot be negative.")
+            or args.trend_threshold_percent <= 0 or args.preheat_seconds < 0):
+        parser.error("baud, timeout, samples, averages, timeout-ms, stability-tolerance-percent and stability-timeout-s must be positive; preheat-seconds, warmup-readings and sample-interval cannot be negative; stability-samples must be at least 2.")
     if args.settle_time is not None and args.settle_time < 0:
         parser.error("settle-time cannot be negative.")
     return args
@@ -239,6 +241,7 @@ def main() -> int:
         points = measurement_points(profile)
         validate_sensor_frequencies(measurement_path, [int(point["frequency_mhz"]) for point in points])
         powers = selected_power_levels(profile, args.power)
+        preheat_power_mw = max(int(value) for value in profile["power_levels_mw"])
         settle_time_s = float(plan["settle_time_s"]) if args.settle_time is None else args.settle_time
         output_path = args.csv or Path("logs") / f"vtx-power-table-{args.vtx}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.csv"
         values: dict[tuple[int, str], float] = {}
@@ -258,8 +261,9 @@ def main() -> int:
             current = parse_vtx_config(client.request(MSP_VTX_CONFIG))
             print(f"Initial VTX: {format_vtx(current)}")
             if direct_frequency:
-                power_indexes = resolve_power_indexes(client, current, [power_mw for _, power_mw in powers] + [25])
+                power_indexes = resolve_power_indexes(client, current, [power_mw for _, power_mw in powers] + [25, preheat_power_mw])
                 safe_power_index = power_indexes[25]
+                preheat_power_index = power_indexes[preheat_power_mw]
                 print("Verifying required FC power levels (read-only; frequencies are sent directly)...")
                 print("Required power levels found. FC frequency table is not used or changed.")
             else:
@@ -267,6 +271,7 @@ def main() -> int:
                 print("Flight Controller VTX table matches the selected VTX profile.")
                 power_indexes = {power_mw: power_index for power_index, power_mw in powers}
                 safe_power_index = list(profile["power_levels_mw"]).index(25) + 1
+                preheat_power_index = list(profile["power_levels_mw"]).index(preheat_power_mw) + 1
 
             print("Verifying the physical VTX model at 25 mW...")
             current = verify_selected_vtx_identity(
@@ -279,6 +284,12 @@ def main() -> int:
             print("Physical VTX frequency confirmed through IRC Tramp.")
 
             try:
+                current = preheat_vtx(
+                    client, current, points[0], profile["bands"],
+                    power_index=preheat_power_index, power_mw=preheat_power_mw,
+                    duration_s=args.preheat_seconds,
+                    direct_frequency=direct_frequency,
+                )
                 sensor = NrpzSensor(args.dll)
                 sensor.open(args.resource)
                 for matrix_power_index, power_mw in powers:
