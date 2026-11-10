@@ -20,4 +20,11 @@ class VtxTableTests(unittest.TestCase):
 
     def test_band_and_power_payloads_use_msp_wire_order(self):
         self.assertEqual(_band_payload(1, "A", [7060, 7080])[:5], bytes((1, 6)) + b"BAND_A"[:3])
+        self.assertEqual(_power_payload(1, 0), bytes((1, 9, 0, 1)) + b"0")
         self.assertEqual(_power_payload(2, 25), bytes((2, 25, 0, 2)) + b"25")
+
+    def test_2_7_power_table_serializes_pit_as_9_and_keeps_measurement_levels(self):
+        powers = load_vtx_table("2.7")["power_levels_mw"]
+        payloads = [_power_payload(index, value) for index, value in enumerate(powers, start=1)]
+        wire_values = [int.from_bytes(payload[1:3], "little") for payload in payloads]
+        self.assertEqual(wire_values, [9, 25, 2000, 4000])

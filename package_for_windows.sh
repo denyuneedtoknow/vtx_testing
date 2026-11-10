@@ -5,6 +5,7 @@ set -euo pipefail
 project_dir=${0:A:h}
 archive_dir="$project_dir/dist"
 archive_path="$archive_dir/VTX-Testing-source.zip"
+build_number=$(date '+%d%m.%H%M')
 staging_dir=$(mktemp -d)
 bundle_dir="$staging_dir/VTX-Testing"
 
@@ -18,6 +19,7 @@ mkdir -p "$bundle_dir" "$archive_dir"
 cp "$project_dir/README.md" "$bundle_dir/"
 cp "$project_dir/build.ps1" "$bundle_dir/"
 cp "$project_dir/requirements.txt" "$bundle_dir/"
+cp "$project_dir/build_info.py" "$bundle_dir/"
 cp "$project_dir/vtx_power_logger.py" "$bundle_dir/"
 cp "$project_dir/vtx_msp_probe.py" "$bundle_dir/"
 cp "$project_dir/vtx_profiles.py" "$bundle_dir/"
@@ -31,6 +33,7 @@ cp "$project_dir/vtx_tester_gui_qt.py" "$bundle_dir/"
 cp "$project_dir/plot_vtx_power_table.py" "$bundle_dir/"
 cp "$project_dir/compare_vtx_power_tables.py" "$bundle_dir/"
 cp -R "$project_dir/configs" "$bundle_dir/"
+print -r -- "$build_number" > "$bundle_dir/BUILD_NUMBER"
 
 rm -f "$archive_path"
 # COPYFILE_DISABLE prevents macOS from adding __MACOSX and ._ metadata files.
@@ -39,4 +42,4 @@ rm -f "$archive_path"
   COPYFILE_DISABLE=1 /usr/bin/zip -r -X "$archive_path" "VTX-Testing" >/dev/null
 )
 
-print "Created: $archive_path"
+print "Created build $build_number: $archive_path"

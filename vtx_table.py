@@ -64,9 +64,14 @@ def _band_payload(index: int, letter: str, frequencies: list[int]) -> bytes:
 
 
 def _power_payload(index: int, value: int) -> bytes:
-    label = "PIT" if value == 0 else (f"{value // 1000}W" if value >= 1000 and value % 1000 == 0 else (f"{value / 1000:g}W" if value >= 1000 else str(value)))
+    # Profiles use logical 0 for the non-measurement PIT/OFF slot, while
+    # Betaflight/IRC Tramp tables encode that first slot with wire value 9.
+    # Sending literal zero creates a table that can be displayed by the FC but
+    # does not select the VTX power levels correctly.
+    wire_value = 9 if value == 0 else value
+    label = "0" if value == 0 else (f"{value // 1000}W" if value >= 1000 and value % 1000 == 0 else (f"{value / 1000:g}W" if value >= 1000 else str(value)))
     encoded = label.encode("ascii")[:8]
-    return bytes((index,)) + struct.pack("<H", value) + bytes((len(encoded),)) + encoded
+    return bytes((index,)) + struct.pack("<H", wire_value) + bytes((len(encoded),)) + encoded
 
 
 def install_vtx_table(client: MspClient, profile: dict[str, Any]) -> dict[str, int | bool | None]:

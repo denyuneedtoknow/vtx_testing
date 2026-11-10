@@ -47,11 +47,13 @@ Remove-Item -Recurse -Force $releaseDir, $workDir, $specDir -ErrorAction Silentl
 & $Python -m PyInstaller --noconfirm --clean --onedir --name VTX-Tester-GUI-Qt `
     --hidden-import serial `
     --add-data "configs;configs" `
+    --add-data "BUILD_NUMBER;." `
     --distpath $releaseDir --workpath $workDir --specpath $specDir `
     vtx_tester_gui_qt.py
 
 Copy-Item -Recurse -Force (Join-Path $PSScriptRoot "configs") (Join-Path $releaseDir "configs")
 Copy-Item -Force (Join-Path $PSScriptRoot "README.md") (Join-Path $releaseDir "README.md")
+Copy-Item -Force (Join-Path $PSScriptRoot "BUILD_NUMBER") (Join-Path $releaseDir "BUILD_NUMBER")
 
 if ($DriverDll) {
     Copy-Item -Force $DriverDll (Join-Path $releaseDir "VTX-Power-Logger\rsnrpz_64.dll")

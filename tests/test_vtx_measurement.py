@@ -200,6 +200,31 @@ class VtxMeasurementTests(unittest.TestCase):
         status = confirm_actual_vtx_frequency(Client(), 7800, timeout_s=0)
         self.assertEqual(status["frequency_mhz"], 7800)
 
+    def test_waits_through_transient_not_ready_status(self):
+        not_ready = bytes((4, 0, 1, 1, 1, 1, 2, 0)) + (0).to_bytes(2, "little") + bytes((0,)) + (0).to_bytes(4, "little")
+
+        class Client:
+            def __init__(self):
+                self.responses = iter((not_ready, VtxMeasurementTests._live_status_payload(7800)))
+
+            def request_v2(self, command, payload=b""):
+                return next(self.responses)
+
+        with patch("vtx_three_point_test.time.sleep", return_value=None):
+            status = confirm_actual_vtx_frequency(Client(), 7800, timeout_s=1)
+        self.assertTrue(status["ready"])
+        self.assertEqual(status["frequency_mhz"], 7800)
+
+    def test_reports_tramp_readiness_timeout_separately_from_wrong_vtx(self):
+        not_ready = bytes((4, 0, 1, 1, 1, 1, 2, 0)) + (0).to_bytes(2, "little") + bytes((0,)) + (0).to_bytes(4, "little")
+
+        class Client:
+            def request_v2(self, command, payload=b""):
+                return not_ready
+
+        with self.assertRaisesRegex(MspError, r"did not become ready.*does not by itself prove"):
+            confirm_actual_vtx_frequency(Client(), 7800, timeout_s=0)
+
     def test_switch_accepts_stored_fc_settings_even_when_legacy_ready_flag_is_false(self):
         current = {
             "power_index": 2, "pit_mode": False, "low_power_disarm": 0,
@@ -253,11 +278,39 @@ class VtxMeasurementTests(unittest.TestCase):
             def request_v2(self, command, payload=b""):
                 return VtxMeasurementTests._live_status_payload(7060)
 
-        with patch("vtx_three_point_test.time.sleep", return_value=None):
+        with (
+            patch("vtx_three_point_test.time.sleep", return_value=None),
+            patch("vtx_three_point_test.switch_and_confirm", return_value=current),
+            patch("vtx_three_point_test.confirm_actual_vtx_frequency", side_effect=MspError("wrong frequency")),
+        ):
             with self.assertRaisesRegex(MspError, "could not be confirmed for the selected profile"):
                 verify_selected_vtx_identity(
                     Client(), current, profile, safe_power_index=2, settle_time_s=0,
                 )
+
+    def test_identity_probe_forces_frequency_transition_before_retry(self):
+        profile = {
+            "model": "8.5 GHz",
+            "identity_probe": {"band": "I", "channel": 1, "frequency_mhz": 7800},
+            "bands": {"A": [7060], "I": [7800]},
+        }
+        current = {"frequency_mhz": 7060}
+        updated = {"frequency_mhz": 7800}
+        with (
+            patch("vtx_three_point_test.switch_and_confirm", return_value=updated) as switch,
+            patch("vtx_three_point_test.confirm_actual_vtx_frequency", side_effect=(MspError("not ready"), {"frequency_mhz": 7800})) as confirm,
+            patch("vtx_three_point_test.time.sleep", return_value=None),
+        ):
+            result = verify_selected_vtx_identity(
+                object(), current, profile, safe_power_index=2, settle_time_s=0,
+            )
+        self.assertEqual(result, updated)
+        self.assertEqual(switch.call_count, 3)
+        self.assertEqual(confirm.call_count, 2)
+        requested_frequencies = [
+            call.kwargs["frequency_mhz"] for call in switch.call_args_list
+        ]
+        self.assertEqual(requested_frequencies, [7800, 7060, 7800])
 
     def test_verifies_complete_vtx_table_without_writing(self):
         profile = {

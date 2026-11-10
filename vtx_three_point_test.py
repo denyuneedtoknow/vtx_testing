@@ -234,27 +234,50 @@ def read_actual_vtx_status(client: MspClient) -> dict[str, int | bool]:
             f"Expected an IRC Tramp VTX, but Betaflight reports device type {status['device_type']}. "
             "Testing is blocked."
         )
-    if not status["ready"] or not status["frequency_available"]:
-        raise MspError("The physical IRC Tramp VTX is not ready or did not report its frequency.")
     return status
 
 
 def confirm_actual_vtx_frequency(client: MspClient, expected_frequency_mhz: int, *, timeout_s: float = 3.0) -> dict[str, int | bool]:
-    """Wait until the physical IRC Tramp VTX reports the requested frequency."""
+    """Wait through transient IRC Tramp readiness states for the requested frequency."""
     deadline = time.monotonic() + timeout_s
     last_status: dict[str, int | bool] | None = None
+    last_error: MspError | None = None
     while True:
-        last_status = read_actual_vtx_status(client)
-        if last_status["frequency_mhz"] == expected_frequency_mhz:
-            return last_status
+        try:
+            status = read_actual_vtx_status(client)
+            last_status = status
+            last_error = None
+            if status["ready"] and status["frequency_available"] and status["frequency_mhz"] == expected_frequency_mhz:
+                return status
+        except MspError as exc:
+            last_error = exc
         if time.monotonic() >= deadline:
-            raise MspError(
-                "Physical VTX frequency does not match the selected table: "
-                f"requested {expected_frequency_mhz} MHz, but the VTX reports "
-                f"{last_status['frequency_mhz']} MHz. Check that the selected VTX model "
-                "matches the connected transmitter. No measurement was taken."
-            )
+            break
         time.sleep(0.2)
+
+    if last_status and last_status["ready"] and last_status["frequency_available"]:
+        raise MspError(
+            "Physical VTX frequency does not match the selected table: "
+            f"requested {expected_frequency_mhz} MHz, but the VTX repeatedly reports "
+            f"{last_status['frequency_mhz']} MHz. Check that the selected VTX model "
+            "matches the connected transmitter. No measurement was taken."
+        )
+    if last_status is not None:
+        detail = (
+            " Last physical status: "
+            f"ready={last_status['ready']}, "
+            f"frequency_available={last_status['frequency_available']}, "
+            f"frequency={last_status['frequency_mhz']} MHz."
+        )
+    elif last_error:
+        detail = f" Last communication error: {last_error}"
+    else:
+        detail = ""
+    raise MspError(
+        f"The physical IRC Tramp VTX did not become ready and report its frequency within {timeout_s:g} s. "
+        "Check VTX power and the IRC Tramp connection; this does not by itself prove that the wrong VTX is installed."
+        + detail
+    )
 
 
 def verify_selected_vtx_identity(
@@ -282,19 +305,64 @@ def verify_selected_vtx_identity(
     ):
         raise ValueError("VTX profile contains an invalid identity_probe.")
     band = list(bands).index(band_letter) + 1
+
+    # If Betaflight already has the probe frequency selected, repeating the same
+    # MSP setting does not necessarily create a new IRC Tramp frequency command.
+    # Keep one different table cell ready so a failed first probe can force an
+    # actual frequency transition before the retry.
+    staging_point: tuple[int, int, int] | None = None
+    for staging_band, frequencies in enumerate(bands.values(), start=1):
+        for staging_channel, staging_frequency in enumerate(frequencies, start=1):
+            if staging_frequency and staging_frequency != frequency_mhz:
+                staging_point = (staging_band, staging_channel, staging_frequency)
+                break
+        if staging_point is not None:
+            break
+
     try:
-        updated = switch_and_confirm(
-            client,
-            current,
-            band=band,
-            channel=channel,
-            frequency_mhz=frequency_mhz,
-            power_index=safe_power_index,
-            settle_time_s=settle_time_s,
-            direct_frequency=False,
-        )
-        confirm_actual_vtx_frequency(client, frequency_mhz, timeout_s=max(2.0, settle_time_s))
-        return updated
+        last_error: MspError | None = None
+        for attempt in range(2):
+            updated = switch_and_confirm(
+                client,
+                current,
+                band=band,
+                channel=channel,
+                frequency_mhz=frequency_mhz,
+                power_index=safe_power_index,
+                settle_time_s=settle_time_s,
+                direct_frequency=False,
+            )
+            try:
+                confirm_actual_vtx_frequency(client, frequency_mhz, timeout_s=max(5.0, settle_time_s))
+                return updated
+            except MspError as exc:
+                last_error = exc
+                if attempt == 0:
+                    print(f"Physical VTX identity probe was not confirmed: {exc}")
+                    if staging_point is None:
+                        print("Retrying the identity probe once...")
+                        current = updated
+                        time.sleep(0.5)
+                    else:
+                        staging_band, staging_channel, staging_frequency = staging_point
+                        print(
+                            "Forcing an IRC Tramp frequency transition via "
+                            f"band {staging_band}, channel {staging_channel} "
+                            f"({staging_frequency} MHz), then retrying {frequency_mhz} MHz..."
+                        )
+                        current = switch_and_confirm(
+                            client,
+                            updated,
+                            band=staging_band,
+                            channel=staging_channel,
+                            frequency_mhz=staging_frequency,
+                            power_index=safe_power_index,
+                            settle_time_s=max(1.0, settle_time_s),
+                            direct_frequency=False,
+                        )
+        if last_error is None:
+            raise MspError("Physical VTX identity probe ended without a device response.")
+        raise last_error
     except MspError as exc:
         raise MspError(
             f"Physical VTX could not be confirmed for the selected profile {profile.get('model', '')!r}. "
